@@ -1,0 +1,6 @@
+name: echorift
+version: '1.0'
+main: kz.bejiihiu.echorift.Main
+api-version: '1.21'
+load: STARTUP
+authors: [ bejiihiu.xs ]
