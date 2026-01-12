@@ -4,3 +4,5 @@ main: kz.bejiihiu.echorift.Main
 api-version: '1.21'
 load: STARTUP
 authors: [ bejiihiu.xs ]
+folia-supported: true
+description: "Echo Rift event plugin for Folia-only SMP."

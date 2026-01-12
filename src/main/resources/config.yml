@@ -1,0 +1,159 @@
+messages:
+  start: "<gold><bold>Эхо раскола</bold> проснулось. В мире появились странные зоны..."
+  end: "<gray>Шум стихает. <bold>Эхо раскола</bold> завершилось."
+  enter: "<yellow>Воздух здесь странный..."
+  deny: "<red>Механика отзывается искажением."
+  ore-reveal: "<gray>Руда откликается иначе...</gray>"
+  collapse-local: "<gray>Эхо затихает в этой зоне."
+  collapse-global: "<gray>Одна из точек эха схлопнулась."
+  hint-prefix: "<dark_aqua>Эхо:</dark_aqua> "
+  hints:
+    - "Слухи говорят о тихом гуле где-то в лесах."
+    - "Кто-то видел странные частицы у воды."
+    - "Ночью воздух становится тяжелее на равнинах."
+
+debug:
+  enabled: true
+
+event:
+  auto-start: true
+  start-time: "18:00"
+  timezone: "system"
+  persistent: false
+
+points:
+  max-active: 3
+  spawn-interval-seconds: 1800
+  allowed-worlds:
+    - "world"
+  min-distance-blocks: 500
+  coordinate-mode: "random-range"
+  custom-list:
+    - "250, -120"
+  random-range:
+    min-x: -2000
+    max-x: 2000
+    min-z: -2000
+    max-z: 2000
+  ring:
+    center-x: 0
+    center-z: 0
+    min-radius: 500
+    max-radius: 1500
+  ttl-seconds:
+    min: 900
+    max: 1800
+  activity-limit:
+    min: 60
+    max: 140
+  enter-cost: 0
+  stay-cost: 1
+  stay-interval-seconds: 60
+  local-message-radius: 64
+  collapse-global: true
+  collapse-local: true
+
+hints:
+  interval-seconds: 600
+
+zone-effects:
+  particle:
+    type: "PORTAL"
+    count: 16
+    radius: 6.0
+    interval-seconds: 12
+  sound:
+    type: "BLOCK_AMETHYST_BLOCK_CHIME"
+    volume: 0.8
+    pitch: 1.2
+    interval-seconds: 20
+
+activity:
+  enter-cost: 0
+  stay-cost: 1
+  stay-interval-seconds: 60
+
+random-tick-boost:
+  enabled: true
+  weight: 3
+  chance: 0.35
+  checks-per-player: 6
+  max-checks-per-tick: 200
+  activity-gain: 1
+  blocks:
+    - WHEAT
+    - CARROTS
+    - POTATOES
+    - BEETROOTS
+    - SUGAR_CANE
+    - BAMBOO
+    - OAK_SAPLING
+
+ore-drop-shift:
+  enabled: true
+  weight: 4
+  chance: 0.7
+  masking: true
+  extra-tool-damage: 1
+  activity-gain: 2
+  mappings:
+    DIAMOND_ORE:
+      drop: COAL
+      min: 1
+      max: 2
+      multiplier: 1.0
+    DEEPSLATE_DIAMOND_ORE:
+      drop: COAL
+      min: 1
+      max: 2
+      multiplier: 1.0
+
+mechanic-lock:
+  enabled: true
+  weight: 3
+  activity-gain: 1
+  knockback:
+    enabled: true
+    strength: 0.4
+  blocked-inventories:
+    - ENDER_CHEST
+    - ANVIL
+    - ENCHANTING
+    - SHULKER_BOX
+  blocked-blocks:
+    - ENDER_CHEST
+    - ANVIL
+    - ENCHANTING_TABLE
+    - CHIPPED_ANVIL
+    - DAMAGED_ANVIL
+  substitute-inventories:
+    - CRAFTING
+    - CARTOGRAPHY
+    - LOOM
+
+hunger-drift:
+  enabled: true
+  weight: 3
+  interval-seconds: 6
+  exhaustion-delta: 0.4
+  activity-gain: 1
+
+placement-decay:
+  enabled: true
+  weight: 2
+  chance: 0.3
+  delay-seconds: 20
+  return-item: true
+  activity-gain: 1
+  whitelist:
+    - COBBLESTONE
+    - DIRT
+    - GRASS_BLOCK
+    - OAK_PLANKS
+  particles:
+    type: "SMOKE"
+    count: 6
+    sound:
+      type: "BLOCK_SAND_BREAK"
+      volume: 0.6
+      pitch: 1.0
