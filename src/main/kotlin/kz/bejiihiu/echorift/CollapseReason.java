@@ -1,5 +1,6 @@
 package kz.bejiihiu.echorift;
 
 public enum CollapseReason {
-    EVENT_END
+    EVENT_END,
+    OP_COMMAND
 }

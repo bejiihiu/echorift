@@ -6,3 +6,7 @@ load: STARTUP
 authors: [ bejiihiu.xs ]
 folia-supported: true
 description: "Echo Rift event plugin for Folia-only SMP."
+commands:
+  echorift:
+    description: "Управление событиями EchoRift (op-only)."
+    usage: "/echorift <start|stop|status|spawn|collapse|reload>"
