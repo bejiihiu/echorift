@@ -36,20 +36,13 @@ points:
   allowed-worlds:
     - "world"
   min-distance-blocks: 500
-  coordinate-mode: "random-range"
-  force-near-player: true
   coordinate-mode: "near-players"
+  force-near-player: true
   near-player:
     min-distance: 120
     max-distance: 420
   custom-list:
     - "250, -120"
-  random-range:
-    # Используется только если игроков нет.
-    min-x: -2000
-    max-x: 2000
-    min-z: -2000
-    max-z: 2000
   ring:
     center-x: 0
     center-z: 0
@@ -118,7 +111,7 @@ zone-effects:
       type: "BLOCK_SCULK_BLOCK_HIT"
       volume: 0.4
       pitch: 0.8
-  player-weather:
+  player-weather-chaos:
     enabled: true
     interval-seconds: 45
     chance: 0.35

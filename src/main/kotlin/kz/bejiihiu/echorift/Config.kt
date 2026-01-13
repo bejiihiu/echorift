@@ -58,10 +58,8 @@ class PointSettings(private val plugin: Main) {
     val spawnIntervalSeconds: Long = plugin.config.getLong("points.spawn-interval-seconds", 900)
     val allowedWorlds: List<String> = plugin.config.getStringList("points.allowed-worlds")
     val minDistanceBlocks: Double = plugin.config.getDouble("points.min-distance-blocks", 500.0)
-    val coordinateMode: String = plugin.config.getString("points.coordinate-mode") ?: "random-range"
+    val coordinateMode: String = plugin.config.getString("points.coordinate-mode") ?: "near-players"
     val forceNearPlayer: Boolean = plugin.config.getBoolean("points.force-near-player", true)
-    // random-range используется только как fallback, когда игроков нет.
-    val randomRange: RangeSettings = RangeSettings(plugin.config.getConfigurationSection("points.random-range"))
     val ring: RingSettings = RingSettings(plugin.config.getConfigurationSection("points.ring"))
     val nearPlayer: NearPlayerSettings = NearPlayerSettings(plugin.config.getConfigurationSection("points.near-player"))
     val customList: List<PointLocation> = parseCustomList()
@@ -94,13 +92,6 @@ class PointSettings(private val plugin: Main) {
 
 data class PointLocation(val x: Int, val z: Int)
 
-class RangeSettings(section: ConfigurationSection?) {
-    val minX: Int = section?.getInt("min-x", -2000) ?: -2000
-    val maxX: Int = section?.getInt("max-x", 2000) ?: 2000
-    val minZ: Int = section?.getInt("min-z", -2000) ?: -2000
-    val maxZ: Int = section?.getInt("max-z", 2000) ?: 2000
-}
-
 class RingSettings(section: ConfigurationSection?) {
     val centerX: Int = section?.getInt("center-x", 0) ?: 0
     val centerZ: Int = section?.getInt("center-z", 0) ?: 0
@@ -130,10 +121,10 @@ class ZoneEffects(plugin: Main) {
     val disturbance: ZoneDisturbanceSettings = ZoneDisturbanceSettings(plugin.config.getConfigurationSection("zone-effects.disturbance"))
     val playerWeather: PlayerWeatherSettings =
         PlayerWeatherSettings(plugin.config.getConfigurationSection("zone-effects.player-weather"))
+    val playerWeatherChaos: PlayerWeatherChaosSettings =
+        PlayerWeatherChaosSettings(plugin.config.getConfigurationSection("zone-effects.player-weather-chaos"))
     val playerAura: PlayerAuraSettings =
         PlayerAuraSettings(plugin.config.getConfigurationSection("zone-effects.player-aura"))
-    val playerWeather: PlayerWeatherChaosSettings =
-        PlayerWeatherChaosSettings(plugin.config.getConfigurationSection("zone-effects.player-weather"))
     val playerDistortion: PlayerDistortionSettings =
         PlayerDistortionSettings(plugin.config.getConfigurationSection("zone-effects.player-distortion"))
 }
@@ -147,7 +138,6 @@ class ParticleSettings(section: ConfigurationSection?) {
 }
 
 class SoundSettings(section: ConfigurationSection?) {
-
     val type: Sound = parseSound(section?.getString("type")) ?: DEFAULT_SOUND
     val volume: Float = (section?.getDouble("volume", DEFAULT_VOLUME) ?: DEFAULT_VOLUME).toFloat()
     val pitch: Float = (section?.getDouble("pitch", DEFAULT_PITCH) ?: DEFAULT_PITCH).toFloat()
@@ -171,10 +161,7 @@ class SoundSettings(section: ConfigurationSection?) {
             val input = raw?.trim().orEmpty()
             if (input.isEmpty()) return null
 
-            // 1) Попытка как key (registry-first подход).
             resolveByKey(input)?.let { return it }
-
-            // 2) Legacy enum-имя (без Sound.valueOf()).
             resolveByLegacyConstant(input)?.let { return it }
 
             return null
@@ -182,9 +169,9 @@ class SoundSettings(section: ConfigurationSection?) {
 
         private fun resolveByKey(input: String): Sound? {
             val keyString = when {
-                ':' in input -> input.lowercase()                  // minecraft:...
-                '.' in input -> "minecraft:${input.lowercase()}"   // block.amethyst...
-                else -> return null                                // не key-формат
+                ':' in input -> input.lowercase()
+                '.' in input -> "minecraft:${input.lowercase()}"
+                else -> return null
             }
 
             val key = NamespacedKey.fromString(keyString) ?: return null
@@ -219,10 +206,14 @@ class ZoneDisturbanceSettings(section: ConfigurationSection?) {
             listOf(Sound.BLOCK_SCULK_CHARGE, Sound.AMBIENT_CAVE, Sound.BLOCK_AMETHYST_BLOCK_RESONATE)
         }
     }
+}
+
 class PlayerWeatherSettings(section: ConfigurationSection?) {
     val mode: String = section?.getString("mode") ?: "invert"
     val stormChance: Double = (section?.getDouble("storm-chance", 0.2) ?: 0.2).coerceIn(0.0, 1.0)
     val forceDurationSeconds: Long = (section?.getLong("force-duration-seconds", 20) ?: 20).coerceAtLeast(1)
+}
+
 class PlayerAuraSettings(section: ConfigurationSection?) {
     val enabled: Boolean = section?.getBoolean("enabled", true) ?: true
     val intervalSeconds: Long = section?.getLong("interval-seconds", 18) ?: 18
