@@ -204,6 +204,11 @@ mechanic-lock:
     - FURNACE
     - BLAST_FURNACE
     - SMOKER
+    - GRINDSTONE
+    - LOOM
+    - CARTOGRAPHY
+    - STONECUTTER
+    - BREWING
     - LOOM
     - CARTOGRAPHY
     - GRINDSTONE
