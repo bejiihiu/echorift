@@ -8,12 +8,12 @@ import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.inventory.InventoryOpenEvent
+import org.bukkit.event.inventory.InventoryType
 import org.bukkit.event.player.PlayerBedEnterEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.block.BlockDropItemEvent
-import org.bukkit.event.inventory.InventoryType
 import org.bukkit.inventory.ItemStack
 import org.bukkit.util.Vector
 import kotlin.random.Random
@@ -32,7 +32,7 @@ class EchoListener(
             return
         }
         val from = event.from
-        val to = event.to
+        val to = event.to ?: return
         if (from.blockX == to.blockX && from.blockZ == to.blockZ && from.world == to.world) return
         debug.info("Перемещение: ${event.player.name} ${from.blockX},${from.blockZ} -> ${to.blockX},${to.blockZ} (${from.world.name}).")
         val player = event.player
@@ -183,7 +183,6 @@ class EchoListener(
             .map { it.trim().uppercase() }
             .toSet()
 
-        val candidates: List<InventoryType> = config.mechanicLock.randomInventories
         val source = if (config.mechanicLock.randomInventories.isNotEmpty()) {
             config.mechanicLock.randomInventories
         } else {
@@ -210,7 +209,6 @@ class EchoListener(
         player.openInventory(inventory)
         debug.info("Открыт заменяющий инвентарь ${type.name} для ${player.name}.")
     }
-
 
     private fun knockback(player: Player) {
         if (!config.mechanicLock.knockbackEnabled) return
