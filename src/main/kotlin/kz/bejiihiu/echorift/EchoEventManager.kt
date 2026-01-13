@@ -4,6 +4,7 @@ import io.papermc.paper.threadedregions.scheduler.ScheduledTask
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.WeatherType
 import org.bukkit.World
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
@@ -34,6 +35,23 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
     private var stayTask: ScheduledTask? = null
     private var hungerTask: ScheduledTask? = null
     private var tickBoostTask: ScheduledTask? = null
+    private var playerWeatherTask: ScheduledTask? = null
+
+    private val forcedPlayerWeather = ConcurrentHashMap<UUID, ForcedWeather>()
+
+    private enum class PlayerWeatherMode {
+        INVERT,
+        RANDOM,
+        MIXED
+    }
+
+    private enum class PlayerWeatherModel {
+        CLEAR,
+        DOWNFALL,
+        STORM
+    }
+
+    private data class ForcedWeather(val model: PlayerWeatherModel, val expiresAt: Instant)
 
     var eventActive: Boolean = false
         private set
@@ -113,6 +131,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         debug.info("Событие остановлено, схлопываем все точки.")
         collapseAll(CollapseReason.EVENT_END)
         cancelTasks()
+        clearPlayerWeatherOverrides()
         MessageUtil.broadcast(config.messages.end)
     }
 
@@ -120,6 +139,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         if (persistState) {
             debug.info("Выключение: режим персистентности, отменяем задачи без схлопывания точек.")
             cancelTasks()
+            clearPlayerWeatherOverrides()
             return
         }
         debug.info("Выключение: режим сессии, останавливаем событие.")
@@ -237,10 +257,21 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         stayTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickStayActivity() }, config.points.stayIntervalSeconds * 20, config.points.stayIntervalSeconds * 20)
         hungerTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickHunger() }, config.hungerDrift.intervalSeconds * 20, config.hungerDrift.intervalSeconds * 20)
         tickBoostTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickRandomBoost() }, 20, 20)
+        playerWeatherTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickPlayerWeatherChaos() }, 20, 20)
     }
 
     private fun cancelTasks() {
-        listOf(spawnTask, ttlTask, hintTask, particleTask, soundTask, stayTask, hungerTask, tickBoostTask).forEach { it?.cancel() }
+        listOf(
+            spawnTask,
+            ttlTask,
+            hintTask,
+            particleTask,
+            soundTask,
+            stayTask,
+            hungerTask,
+            tickBoostTask,
+            playerWeatherTask
+        ).forEach { it?.cancel() }
         spawnTask = null
         ttlTask = null
         hintTask = null
@@ -249,6 +280,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         stayTask = null
         hungerTask = null
         tickBoostTask = null
+        playerWeatherTask = null
         debug.info("Все запланированные задачи отменены.")
     }
 
@@ -460,6 +492,37 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         }
     }
 
+    private fun tickPlayerWeatherChaos() {
+        if (!eventActive) {
+            debug.info("Погода игроков не обновлена: событие не активно.")
+            return
+        }
+        val settings = config.zoneEffects.playerWeather
+        val mode = parsePlayerWeatherMode(settings.mode)
+        val now = Instant.now()
+        debug.info("Погода игроков: режим=$mode длительность=${settings.forceDurationSeconds}с онлайн=${Bukkit.getOnlinePlayers().size}.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location)
+                if (point == null) {
+                    if (forcedPlayerWeather.remove(player.uniqueId) != null) {
+                        player.resetPlayerWeather()
+                        debug.info("Погода игроков сброшена для ${player.name}: вне зоны.")
+                    }
+                    return@run
+                }
+                val existing = forcedPlayerWeather[player.uniqueId]
+                if (existing != null && now.isBefore(existing.expiresAt)) {
+                    return@run
+                }
+                val model = pickPlayerWeatherModel(player.world, mode, settings.stormChance)
+                applyPlayerWeatherModel(player, model, settings.forceDurationSeconds)
+                forcedPlayerWeather[player.uniqueId] = ForcedWeather(model, now.plusSeconds(settings.forceDurationSeconds))
+                debug.info("Погода игроков применена: ${player.name} -> $model до ${forcedPlayerWeather[player.uniqueId]?.expiresAt}.")
+            }
+        }
+    }
+
     private fun tickHunger() {
         if (!eventActive || !config.hungerDrift.enabled) {
             debug.info("Голод не обновлён: событие активно=$eventActive, hungerDrift=${config.hungerDrift.enabled}.")
@@ -473,6 +536,63 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                 player.exhaustion = (player.exhaustion + config.hungerDrift.exhaustionDelta).coerceAtLeast(0f)
                 debug.info("Голод: ${player.name} усталость +${config.hungerDrift.exhaustionDelta}.")
                 addActivity(point, config.hungerDrift.activityGain)
+            }
+        }
+    }
+
+    private fun clearPlayerWeatherOverrides() {
+        if (forcedPlayerWeather.isEmpty()) return
+        forcedPlayerWeather.keys.forEach { playerId ->
+            val player = Bukkit.getPlayer(playerId) ?: return@forEach
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                player.resetPlayerWeather()
+            }
+        }
+        forcedPlayerWeather.clear()
+        debug.info("Форсированная погода игроков сброшена.")
+    }
+
+    private fun parsePlayerWeatherMode(raw: String): PlayerWeatherMode =
+        when (raw.trim().lowercase()) {
+            "invert" -> PlayerWeatherMode.INVERT
+            "random" -> PlayerWeatherMode.RANDOM
+            "mixed" -> PlayerWeatherMode.MIXED
+            else -> PlayerWeatherMode.INVERT
+        }
+
+    private fun pickPlayerWeatherModel(world: World, mode: PlayerWeatherMode, stormChance: Double): PlayerWeatherModel {
+        val clampedStormChance = stormChance.coerceIn(0.0, 1.0)
+        return when (mode) {
+            PlayerWeatherMode.INVERT -> invertPlayerWeather(world)
+            PlayerWeatherMode.RANDOM -> randomPlayerWeather(clampedStormChance)
+            PlayerWeatherMode.MIXED -> if (random.nextBoolean()) invertPlayerWeather(world) else randomPlayerWeather(clampedStormChance)
+        }
+    }
+
+    private fun invertPlayerWeather(world: World): PlayerWeatherModel =
+        if (world.hasStorm() || world.isThundering) {
+            PlayerWeatherModel.CLEAR
+        } else {
+            PlayerWeatherModel.DOWNFALL
+        }
+
+    private fun randomPlayerWeather(stormChance: Double): PlayerWeatherModel {
+        val roll = random.nextDouble()
+        if (roll < stormChance) return PlayerWeatherModel.STORM
+        return if (random.nextBoolean()) PlayerWeatherModel.CLEAR else PlayerWeatherModel.DOWNFALL
+    }
+
+    private fun applyPlayerWeatherModel(player: Player, model: PlayerWeatherModel, durationSeconds: Long) {
+        when (model) {
+            PlayerWeatherModel.CLEAR -> player.setPlayerWeather(WeatherType.CLEAR)
+            PlayerWeatherModel.DOWNFALL -> player.setPlayerWeather(WeatherType.DOWNFALL)
+            PlayerWeatherModel.STORM -> {
+                player.setPlayerWeather(WeatherType.DOWNFALL)
+                val ticks = (durationSeconds * 20).toInt().coerceAtLeast(1)
+                player.world.setStorm(true)
+                player.world.setThundering(true)
+                player.world.weatherDuration = ticks
+                player.world.thunderDuration = ticks
             }
         }
     }

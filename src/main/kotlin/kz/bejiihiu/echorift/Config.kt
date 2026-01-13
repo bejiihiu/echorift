@@ -108,6 +108,8 @@ class HintSettings(plugin: Main) {
 class ZoneEffects(plugin: Main) {
     val particle: ParticleSettings = ParticleSettings(plugin.config.getConfigurationSection("zone-effects.particle"))
     val sound: SoundSettings = SoundSettings(plugin.config.getConfigurationSection("zone-effects.sound"))
+    val playerWeather: PlayerWeatherSettings =
+        PlayerWeatherSettings(plugin.config.getConfigurationSection("zone-effects.player-weather"))
 }
 
 class ParticleSettings(section: ConfigurationSection?) {
@@ -167,6 +169,12 @@ class SoundSettings(section: ConfigurationSection?) {
                 field.get(null) as? Sound
             }.getOrNull()
     }
+}
+
+class PlayerWeatherSettings(section: ConfigurationSection?) {
+    val mode: String = section?.getString("mode") ?: "invert"
+    val stormChance: Double = (section?.getDouble("storm-chance", 0.2) ?: 0.2).coerceIn(0.0, 1.0)
+    val forceDurationSeconds: Long = (section?.getLong("force-duration-seconds", 20) ?: 20).coerceAtLeast(1)
 }
 
 class OreDropShiftSettings(private val plugin: Main) {

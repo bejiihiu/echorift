@@ -67,6 +67,10 @@ zone-effects:
     volume: 0.8
     pitch: 1.2
     interval-seconds: 20
+  player-weather:
+    mode: "invert"
+    storm-chance: 0.2
+    force-duration-seconds: 20
 
 activity:
   enter-cost: 0
