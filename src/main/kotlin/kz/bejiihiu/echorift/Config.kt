@@ -113,6 +113,9 @@ class NearPlayerSettings(section: ConfigurationSection?) {
 
 class HintSettings(plugin: Main) {
     val intervalSeconds: Long = plugin.config.getLong("hints.interval-seconds", 600)
+    val nearRadius: Double = plugin.config.getDouble("hints.near-radius", 24.0)
+    val farRadius: Double = plugin.config.getDouble("hints.far-radius", 96.0)
+    val nearFrequencyMultiplier: Double = plugin.config.getDouble("hints.near-frequency-multiplier", 2.0)
 }
 
 class WhisperSettings(plugin: Main) {

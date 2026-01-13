@@ -559,6 +559,31 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
             return
         }
         debug.info("Отправка частиц в ${points.size} точках.")
+        if (points.isEmpty()) return
+        for (player in Bukkit.getOnlinePlayers()) {
+            val playerWorld = player.world
+            val playerLocation = player.location
+            val px = playerLocation.x
+            val pz = playerLocation.z
+            points.values.forEach { point ->
+                if (point.worldName != playerWorld.name) return@forEach
+                val dx = px - point.centerX
+                val dz = pz - point.centerZ
+                val multiplier = localEffectMultiplier(dx * dx + dz * dz)
+                if (multiplier <= 0.0) return@forEach
+                val location = Location(playerWorld, point.centerX.toDouble(), playerWorld.spawnLocation.y, point.centerZ.toDouble())
+                Bukkit.getRegionScheduler().run(plugin, playerLocation) { _ ->
+                    repeatLocalEffect(multiplier) {
+                        player.spawnParticle(
+                            config.zoneEffects.particle.type,
+                            location,
+                            config.zoneEffects.particle.count,
+                            config.zoneEffects.particle.radius,
+                            1.0,
+                            config.zoneEffects.particle.radius
+                        )
+                    }
+                }
         points.values.forEach { point ->
             val world = Bukkit.getWorld(point.worldName) ?: return@forEach
 
@@ -580,6 +605,51 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
             return
         }
         debug.info("Воспроизведение звуков в ${points.size} точках.")
+        if (points.isEmpty()) return
+        for (player in Bukkit.getOnlinePlayers()) {
+            val playerWorld = player.world
+            val playerLocation = player.location
+            val px = playerLocation.x
+            val pz = playerLocation.z
+            points.values.forEach { point ->
+                if (point.worldName != playerWorld.name) return@forEach
+                val dx = px - point.centerX
+                val dz = pz - point.centerZ
+                val multiplier = localEffectMultiplier(dx * dx + dz * dz)
+                if (multiplier <= 0.0) return@forEach
+                val location = Location(playerWorld, point.centerX.toDouble(), playerWorld.spawnLocation.y, point.centerZ.toDouble())
+                Bukkit.getRegionScheduler().run(plugin, playerLocation) { _ ->
+                    repeatLocalEffect(multiplier) {
+                        player.playSound(location, config.zoneEffects.sound.type, config.zoneEffects.sound.volume, config.zoneEffects.sound.pitch)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun localEffectMultiplier(distanceSquared: Double): Double {
+        val nearRadius = config.hints.nearRadius.coerceAtLeast(0.0)
+        val farRadius = config.hints.farRadius.coerceAtLeast(nearRadius)
+        if (farRadius <= 0.0) return 0.0
+        val farRadiusSquared = farRadius * farRadius
+        if (distanceSquared > farRadiusSquared) return 0.0
+        val nearMultiplier = config.hints.nearFrequencyMultiplier.coerceAtLeast(1.0)
+        val nearRadiusSquared = nearRadius * nearRadius
+        if (nearRadius <= 0.0 || distanceSquared <= nearRadiusSquared) {
+            return nearMultiplier
+        }
+        if (farRadius == nearRadius) return 1.0
+        val distance = kotlin.math.sqrt(distanceSquared)
+        val t = ((farRadius - distance) / (farRadius - nearRadius)).coerceIn(0.0, 1.0)
+        return 1.0 + (nearMultiplier - 1.0) * t
+    }
+
+    private fun repeatLocalEffect(multiplier: Double, action: () -> Unit) {
+        val whole = multiplier.toInt().coerceAtLeast(1)
+        repeat(whole) { action() }
+        val fraction = multiplier - whole
+        if (fraction > 0.0 && random.nextDouble() < fraction) {
+            action()
         points.values.forEach { point ->
             val world = Bukkit.getWorld(point.worldName) ?: return@forEach
             val location = mysticScatterLocation(
