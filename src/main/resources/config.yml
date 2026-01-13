@@ -130,6 +130,16 @@ mechanic-lock:
     - CRAFTING
     - CARTOGRAPHY
     - LOOM
+  random-inventories:
+    - CRAFTING
+    - FURNACE
+    - BLAST_FURNACE
+    - SMOKER
+    - GRINDSTONE
+    - LOOM
+    - CARTOGRAPHY
+    - STONECUTTER
+    - BREWING
 
 hunger-drift:
   enabled: true

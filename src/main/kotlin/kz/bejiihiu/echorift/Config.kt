@@ -203,6 +203,7 @@ class MechanicLockSettings(plugin: Main) {
     val blockedInventories: Set<String> = plugin.config.getStringList("mechanic-lock.blocked-inventories").map { it.uppercase() }.toSet()
     val blockedBlocks: Set<Material> = plugin.config.getStringList("mechanic-lock.blocked-blocks").mapNotNull { Material.matchMaterial(it) }.toSet()
     val substituteInventories: List<String> = plugin.config.getStringList("mechanic-lock.substitute-inventories").map { it.uppercase() }
+    val randomInventories: List<String> = plugin.config.getStringList("mechanic-lock.random-inventories").map { it.uppercase() }
 }
 
 class RandomTickBoostSettings(plugin: Main) {
