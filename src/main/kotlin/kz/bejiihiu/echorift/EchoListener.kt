@@ -184,6 +184,13 @@ class EchoListener(
             .toSet()
 
         val candidates: List<InventoryType> = config.mechanicLock.randomInventories
+        val source = if (config.mechanicLock.randomInventories.isNotEmpty()) {
+            config.mechanicLock.randomInventories
+        } else {
+            config.mechanicLock.substituteInventories
+        }
+
+        val candidates: List<InventoryType> = source
             .asSequence()
             .mapNotNull { raw ->
                 val name = raw.trim().uppercase()

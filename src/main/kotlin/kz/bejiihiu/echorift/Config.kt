@@ -15,6 +15,7 @@ class PluginConfig(plugin: Main) {
     val event: EventSettings = EventSettings(plugin)
     val points: PointSettings = PointSettings(plugin)
     val hints: HintSettings = HintSettings(plugin)
+    val whispers: WhisperSettings = WhisperSettings(plugin)
     val zoneEffects: ZoneEffects = ZoneEffects(plugin)
     val oreDropShift: OreDropShiftSettings = OreDropShiftSettings(plugin)
     val mechanicLock: MechanicLockSettings = MechanicLockSettings(plugin)
@@ -31,12 +32,15 @@ class Messages(plugin: Main) {
     val start: String = plugin.config.getString("messages.start") ?: ""
     val end: String = plugin.config.getString("messages.end") ?: ""
     val enter: String = plugin.config.getString("messages.enter") ?: ""
+    val enterMessages: List<String> = plugin.config.getStringList("messages.enter-messages")
     val deny: String = plugin.config.getString("messages.deny") ?: ""
     val oreReveal: String = plugin.config.getString("messages.ore-reveal") ?: ""
     val collapseLocal: String = plugin.config.getString("messages.collapse-local") ?: ""
     val collapseGlobal: String = plugin.config.getString("messages.collapse-global") ?: ""
     val hintPrefix: String = plugin.config.getString("messages.hint-prefix") ?: ""
     val hints: List<String> = plugin.config.getStringList("messages.hints")
+    val whisperPrefix: String = plugin.config.getString("messages.whisper-prefix") ?: ""
+    val whispers: List<String> = plugin.config.getStringList("messages.whispers")
 }
 
 class EventSettings(plugin: Main) {
@@ -50,13 +54,14 @@ class EventSettings(plugin: Main) {
 }
 
 class PointSettings(private val plugin: Main) {
-    val maxActive: Int = plugin.config.getInt("points.max-active", 3)
-    val spawnIntervalSeconds: Long = plugin.config.getLong("points.spawn-interval-seconds", 1800)
+    val maxActive: Int = plugin.config.getInt("points.max-active", 6)
+    val spawnIntervalSeconds: Long = plugin.config.getLong("points.spawn-interval-seconds", 900)
     val allowedWorlds: List<String> = plugin.config.getStringList("points.allowed-worlds")
     val minDistanceBlocks: Double = plugin.config.getDouble("points.min-distance-blocks", 500.0)
     val coordinateMode: String = plugin.config.getString("points.coordinate-mode") ?: "random-range"
     val randomRange: RangeSettings = RangeSettings(plugin.config.getConfigurationSection("points.random-range"))
     val ring: RingSettings = RingSettings(plugin.config.getConfigurationSection("points.ring"))
+    val nearPlayer: NearPlayerSettings = NearPlayerSettings(plugin.config.getConfigurationSection("points.near-player"))
     val customList: List<PointLocation> = parseCustomList()
     val ttlRange: IntRange = rangeFrom(plugin.config.getConfigurationSection("points.ttl-seconds"), 900, 1800)
     val activityLimitRange: IntRange = rangeFrom(plugin.config.getConfigurationSection("points.activity-limit"), 60, 140)
@@ -101,19 +106,35 @@ class RingSettings(section: ConfigurationSection?) {
     val maxRadius: Int = section?.getInt("max-radius", 1500) ?: 1500
 }
 
+class NearPlayerSettings(section: ConfigurationSection?) {
+    val minDistance: Int = section?.getInt("min-distance", 120) ?: 120
+    val maxDistance: Int = section?.getInt("max-distance", 420) ?: 420
+}
+
 class HintSettings(plugin: Main) {
     val intervalSeconds: Long = plugin.config.getLong("hints.interval-seconds", 600)
+}
+
+class WhisperSettings(plugin: Main) {
+    val intervalSeconds: Long = plugin.config.getLong("whispers.interval-seconds", 360)
 }
 
 class ZoneEffects(plugin: Main) {
     val particle: ParticleSettings = ParticleSettings(plugin.config.getConfigurationSection("zone-effects.particle"))
     val sound: SoundSettings = SoundSettings(plugin.config.getConfigurationSection("zone-effects.sound"))
+    val playerAura: PlayerAuraSettings =
+        PlayerAuraSettings(plugin.config.getConfigurationSection("zone-effects.player-aura"))
+    val playerWeather: PlayerWeatherChaosSettings =
+        PlayerWeatherChaosSettings(plugin.config.getConfigurationSection("zone-effects.player-weather"))
+    val playerDistortion: PlayerDistortionSettings =
+        PlayerDistortionSettings(plugin.config.getConfigurationSection("zone-effects.player-distortion"))
 }
 
 class ParticleSettings(section: ConfigurationSection?) {
     val type: Particle = Particle.valueOf(section?.getString("type") ?: "PORTAL")
     val count: Int = section?.getInt("count", 16) ?: 16
     val radius: Double = section?.getDouble("radius", 6.0) ?: 6.0
+    val scatterRadius: Double = section?.getDouble("scatter-radius", 0.0) ?: 0.0
     val intervalSeconds: Long = section?.getLong("interval-seconds", 12) ?: 12
 }
 
@@ -122,6 +143,7 @@ class SoundSettings(section: ConfigurationSection?) {
     val type: Sound = parseSound(section?.getString("type")) ?: DEFAULT_SOUND
     val volume: Float = (section?.getDouble("volume", DEFAULT_VOLUME) ?: DEFAULT_VOLUME).toFloat()
     val pitch: Float = (section?.getDouble("pitch", DEFAULT_PITCH) ?: DEFAULT_PITCH).toFloat()
+    val scatterRadius: Double = section?.getDouble("scatter-radius", 0.0) ?: 0.0
     val intervalSeconds: Long =
         section?.getLong("interval-seconds", DEFAULT_INTERVAL_SECONDS) ?: DEFAULT_INTERVAL_SECONDS
 
@@ -167,6 +189,31 @@ class SoundSettings(section: ConfigurationSection?) {
                 field.get(null) as? Sound
             }.getOrNull()
     }
+}
+
+class PlayerAuraSettings(section: ConfigurationSection?) {
+    val enabled: Boolean = section?.getBoolean("enabled", true) ?: true
+    val intervalSeconds: Long = section?.getLong("interval-seconds", 18) ?: 18
+    val particle: ParticleSettings = ParticleSettings(section?.getConfigurationSection("particle"))
+    val sound: SoundSettings = SoundSettings(section?.getConfigurationSection("sound"))
+}
+
+class PlayerWeatherChaosSettings(section: ConfigurationSection?) {
+    val enabled: Boolean = section?.getBoolean("enabled", true) ?: true
+    val intervalSeconds: Long = section?.getLong("interval-seconds", 45) ?: 45
+    val chance: Double = section?.getDouble("chance", 0.35) ?: 0.35
+}
+
+class PlayerDistortionSettings(section: ConfigurationSection?) {
+    val enabled: Boolean = section?.getBoolean("enabled", true) ?: true
+    val intervalSeconds: Long = section?.getLong("interval-seconds", 30) ?: 30
+    val chance: Double = section?.getDouble("chance", 0.35) ?: 0.35
+    val durationSeconds: Int = section?.getInt("duration-seconds", 6) ?: 6
+    val amplifier: Int = section?.getInt("amplifier", 0) ?: 0
+    val ambient: Boolean = section?.getBoolean("ambient", true) ?: true
+    val showParticles: Boolean = section?.getBoolean("show-particles", true) ?: true
+    val showIcon: Boolean = section?.getBoolean("show-icon", false) ?: false
+    val effects: Set<String> = section?.getStringList("effects")?.map { it.uppercase() }?.toSet().orEmpty()
 }
 
 class OreDropShiftSettings(private val plugin: Main) {
