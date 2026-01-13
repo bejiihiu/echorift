@@ -12,6 +12,7 @@ import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
+import org.bukkit.util.Vector
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -40,6 +41,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
     private var stayTask: ScheduledTask? = null
     private var hungerTask: ScheduledTask? = null
     private var tickBoostTask: ScheduledTask? = null
+    private var disturbanceTask: ScheduledTask? = null
     private var playerWeatherTask: ScheduledTask? = null
 
     private val forcedPlayerWeather = ConcurrentHashMap<UUID, ForcedWeather>()
@@ -257,6 +259,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
 
     fun scheduleTasks() {
         cancelTasks()
+        debug.info("Планируем задачи: spawn=${config.points.spawnIntervalSeconds}с hint=${config.hints.intervalSeconds}с particle=${config.zoneEffects.particle.intervalSeconds}с sound=${config.zoneEffects.sound.intervalSeconds}с stay=${config.points.stayIntervalSeconds}с hunger=${config.hungerDrift.intervalSeconds}с disturbance=${config.zoneEffects.disturbance.intervalSeconds}с.")
         debug.info("Планируем задачи: spawn=${config.points.spawnIntervalSeconds}с hint=${config.hints.intervalSeconds}с whisper=${config.whispers.intervalSeconds}с particle=${config.zoneEffects.particle.intervalSeconds}с sound=${config.zoneEffects.sound.intervalSeconds}с stay=${config.points.stayIntervalSeconds}с hunger=${config.hungerDrift.intervalSeconds}с.")
         spawnTask = globalScheduler.runAtFixedRate(plugin, { _ -> spawnPoint() }, 20, config.points.spawnIntervalSeconds * 20)
         ttlTask = globalScheduler.runAtFixedRate(plugin, { _ -> checkTtl() }, 40, 40)
@@ -276,6 +279,11 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         stayTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickStayActivity() }, config.points.stayIntervalSeconds * 20, config.points.stayIntervalSeconds * 20)
         hungerTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickHunger() }, config.hungerDrift.intervalSeconds * 20, config.hungerDrift.intervalSeconds * 20)
         tickBoostTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickRandomBoost() }, 20, 20)
+        disturbanceTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickZoneDisturbance() }, 40, config.zoneEffects.disturbance.intervalSeconds * 20)
+    }
+
+    private fun cancelTasks() {
+        listOf(spawnTask, ttlTask, hintTask, particleTask, soundTask, stayTask, hungerTask, tickBoostTask, disturbanceTask).forEach { it?.cancel() }
         playerWeatherTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickPlayerWeatherChaos() }, 20, 20)
         if (config.zoneEffects.playerAura.enabled && config.zoneEffects.playerAura.intervalSeconds > 0) {
             auraTask = globalScheduler.runAtFixedRate(
@@ -334,6 +342,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         stayTask = null
         hungerTask = null
         tickBoostTask = null
+        disturbanceTask = null
         playerWeatherTask = null
         auraTask = null
         weatherTask = null
@@ -909,6 +918,42 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                             addActivity(point, config.randomTickBoost.activityGain)
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private fun tickZoneDisturbance() {
+        if (!eventActive) {
+            debug.info("Искажения зоны пропущены: событие не активно.")
+            return
+        }
+        val disturbance = config.zoneEffects.disturbance
+        debug.info("Искажения зоны: старт, онлайн=${Bukkit.getOnlinePlayers().size}.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location) ?: return@run
+                debug.info("Искажения зоны: ${player.name} в точке ${point.id}.")
+                if (random.nextDouble() <= disturbance.pushChance) {
+                    val angle = random.nextDouble(0.0, Math.PI * 2)
+                    val horizontal = disturbance.pushStrength
+                    val velocity = Vector(
+                        cos(angle) * horizontal,
+                        horizontal * 0.35,
+                        sin(angle) * horizontal
+                    )
+                    player.velocity = player.velocity.add(velocity)
+                    debug.info("Искажения зоны: толчок ${player.name} v=$velocity.")
+                }
+                if (random.nextDouble() <= disturbance.slowFallChance) {
+                    val durationTicks = disturbance.slowFallDurationSeconds.coerceAtLeast(1) * 20
+                    player.addPotionEffect(PotionEffect(PotionEffectType.SLOW_FALLING, durationTicks, 0, true, true, true))
+                    debug.info("Искажения зоны: медленное падение ${player.name} на ${disturbance.slowFallDurationSeconds}s.")
+                }
+                if (disturbance.noiseSounds.isNotEmpty() && random.nextDouble() <= disturbance.noiseChance) {
+                    val sound = disturbance.noiseSounds.random()
+                    player.world.playSound(player.location, sound, disturbance.noiseVolume, disturbance.noisePitch)
+                    debug.info("Искажения зоны: шум $sound для ${player.name}.")
                 }
             }
         }

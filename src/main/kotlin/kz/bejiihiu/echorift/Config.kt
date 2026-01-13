@@ -125,6 +125,7 @@ class WhisperSettings(plugin: Main) {
 class ZoneEffects(plugin: Main) {
     val particle: ParticleSettings = ParticleSettings(plugin.config.getConfigurationSection("zone-effects.particle"))
     val sound: SoundSettings = SoundSettings(plugin.config.getConfigurationSection("zone-effects.sound"))
+    val disturbance: ZoneDisturbanceSettings = ZoneDisturbanceSettings(plugin.config.getConfigurationSection("zone-effects.disturbance"))
     val playerWeather: PlayerWeatherSettings =
         PlayerWeatherSettings(plugin.config.getConfigurationSection("zone-effects.player-weather"))
     val playerAura: PlayerAuraSettings =
@@ -196,6 +197,26 @@ class SoundSettings(section: ConfigurationSection?) {
     }
 }
 
+class ZoneDisturbanceSettings(section: ConfigurationSection?) {
+    val intervalSeconds: Long = section?.getLong("interval-seconds", 10L) ?: 10L
+    val pushChance: Double = section?.getDouble("push-chance", 0.25) ?: 0.25
+    val pushStrength: Double = section?.getDouble("push-strength", 0.2) ?: 0.2
+    val slowFallChance: Double = section?.getDouble("slow-fall-chance", 0.1) ?: 0.1
+    val slowFallDurationSeconds: Int = section?.getInt("slow-fall-duration-seconds", 2) ?: 2
+    val noiseChance: Double = section?.getDouble("noise-chance", 0.05) ?: 0.05
+    val noiseVolume: Float = (section?.getDouble("noise-volume", 0.8) ?: 0.8).toFloat()
+    val noisePitch: Float = (section?.getDouble("noise-pitch", 0.9) ?: 0.9).toFloat()
+    val noiseSounds: List<Sound> = parseNoiseSounds(section)
+
+    private fun parseNoiseSounds(section: ConfigurationSection?): List<Sound> {
+        val entries = section?.getStringList("noise-sounds").orEmpty()
+        val parsed = entries.mapNotNull { SoundSettings.parseSound(it) }
+        return if (parsed.isNotEmpty()) {
+            parsed
+        } else {
+            listOf(Sound.BLOCK_SCULK_CHARGE, Sound.AMBIENT_CAVE, Sound.BLOCK_AMETHYST_BLOCK_RESONATE)
+        }
+    }
 class PlayerWeatherSettings(section: ConfigurationSection?) {
     val mode: String = section?.getString("mode") ?: "invert"
     val stormChance: Double = (section?.getDouble("storm-chance", 0.2) ?: 0.2).coerceIn(0.0, 1.0)
