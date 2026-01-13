@@ -183,7 +183,13 @@ class EchoListener(
             .map { it.trim().uppercase() }
             .toSet()
 
-        val candidates: List<InventoryType> = config.mechanicLock.substituteInventories
+        val source = if (config.mechanicLock.randomInventories.isNotEmpty()) {
+            config.mechanicLock.randomInventories
+        } else {
+            config.mechanicLock.substituteInventories
+        }
+
+        val candidates: List<InventoryType> = source
             .asSequence()
             .mapNotNull { raw ->
                 val name = raw.trim().uppercase() // работает даже если raw был Any?
