@@ -36,6 +36,8 @@ points:
   allowed-worlds:
     - "world"
   min-distance-blocks: 500
+  coordinate-mode: "random-range"
+  force-near-player: true
   coordinate-mode: "near-players"
   near-player:
     min-distance: 120
@@ -43,6 +45,7 @@ points:
   custom-list:
     - "250, -120"
   random-range:
+    # Используется только если игроков нет.
     min-x: -2000
     max-x: 2000
     min-z: -2000

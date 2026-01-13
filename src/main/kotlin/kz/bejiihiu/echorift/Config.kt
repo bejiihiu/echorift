@@ -59,6 +59,8 @@ class PointSettings(private val plugin: Main) {
     val allowedWorlds: List<String> = plugin.config.getStringList("points.allowed-worlds")
     val minDistanceBlocks: Double = plugin.config.getDouble("points.min-distance-blocks", 500.0)
     val coordinateMode: String = plugin.config.getString("points.coordinate-mode") ?: "random-range"
+    val forceNearPlayer: Boolean = plugin.config.getBoolean("points.force-near-player", true)
+    // random-range используется только как fallback, когда игроков нет.
     val randomRange: RangeSettings = RangeSettings(plugin.config.getConfigurationSection("points.random-range"))
     val ring: RingSettings = RingSettings(plugin.config.getConfigurationSection("points.ring"))
     val nearPlayer: NearPlayerSettings = NearPlayerSettings(plugin.config.getConfigurationSection("points.near-player"))
