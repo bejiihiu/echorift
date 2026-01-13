@@ -27,10 +27,14 @@ class EchoListener(
 
     @EventHandler(ignoreCancelled = true)
     fun onMove(event: PlayerMoveEvent) {
-        if (!manager.eventActive) return
+        if (!manager.eventActive) {
+            debug.info("Перемещение игнорируется: событие не активно.")
+            return
+        }
         val from = event.from
         val to = event.to
         if (from.blockX == to.blockX && from.blockZ == to.blockZ && from.world == to.world) return
+        debug.info("Перемещение: ${event.player.name} ${from.blockX},${from.blockZ} -> ${to.blockX},${to.blockZ} (${from.world.name}).")
         val player = event.player
         val currentPoint = manager.isInPoint(to)
         val previousPoint = manager.isInPoint(from)
@@ -44,21 +48,33 @@ class EchoListener(
     fun onQuit(event: PlayerQuitEvent) {
         val player = event.player
         val point = manager.isInPoint(player.location) ?: return
+        debug.info("Игрок ${player.name} вышел с сервера внутри точки ${point.id}.")
         manager.handlePlayerExit(player, point)
     }
 
     @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
     fun onOreDrop(event: BlockDropItemEvent) {
-        if (!manager.eventActive) return
+        if (!manager.eventActive) {
+            debug.info("Дроп руды пропущен: событие не активно.")
+            return
+        }
         val point = manager.isInPoint(event.block.location) ?: return
-        if (point.distortion != DistortionType.ORE_DROP_SHIFT) return
+        if (point.distortion != DistortionType.ORE_DROP_SHIFT) {
+            debug.info("Дроп руды: точка ${point.id} не имеет нужного искажения (${point.distortion}).")
+            return
+        }
         val mapping = config.oreDropShift.mappings[event.block.type] ?: return
-        if (random.nextDouble() > config.oreDropShift.chance) return
-        debug.info("Ore drop shift triggered at ${event.block.x},${event.block.y},${event.block.z} by ${event.player.name}.")
+        val roll = random.nextDouble()
+        if (roll > config.oreDropShift.chance) {
+            debug.info("Дроп руды: шанс не сработал (roll=$roll, шанс=${config.oreDropShift.chance}).")
+            return
+        }
+        debug.info("Смещение дропа руды: ${event.block.x},${event.block.y},${event.block.z} игрок=${event.player.name}.")
         event.items.clear()
         val count = random.nextInt(mapping.min, mapping.max + 1)
         val total = (count * mapping.multiplier).toInt().coerceAtLeast(1)
         val drop = ItemStack(mapping.drop, total)
+        debug.info("Дроп руды: выбран предмет=${mapping.drop}, базовыйCount=$count, множитель=${mapping.multiplier}, итог=$total.")
         event.block.world.dropItemNaturally(event.block.location, drop)
         val tool = event.player.inventory.itemInMainHand
         if (tool.type != Material.AIR && tool.itemMeta is org.bukkit.inventory.meta.Damageable) {
@@ -78,9 +94,12 @@ class EchoListener(
     @EventHandler(ignoreCancelled = true)
     fun onBedEnter(event: PlayerBedEnterEvent) {
         val point = manager.isInPoint(event.bed.location) ?: return
-        if (point.distortion != DistortionType.MECHANIC_LOCK) return
+        if (point.distortion != DistortionType.MECHANIC_LOCK) {
+            debug.info("Сон: точка ${point.id} без мех-лока (${point.distortion}), пропуск.")
+            return
+        }
         event.isCancelled = true
-        debug.info("Mechanic lock: blocked bed enter for ${event.player.name}.")
+        debug.info("Мех-лок: запрет сна для ${event.player.name}.")
         manager.addActivity(point, config.mechanicLock.activityGain)
         MessageUtil.send(event.player, config.messages.deny)
         openSubstituteInventory(event.player)
@@ -91,10 +110,16 @@ class EchoListener(
     fun onInventoryOpen(event: InventoryOpenEvent) {
         val player = event.player as? Player ?: return
         val point = manager.isInPoint(player.location) ?: return
-        if (point.distortion != DistortionType.MECHANIC_LOCK) return
-        if (!config.mechanicLock.blockedInventories.contains(event.inventory.type.name)) return
+        if (point.distortion != DistortionType.MECHANIC_LOCK) {
+            debug.info("Инвентарь: точка ${point.id} без мех-лока (${point.distortion}), пропуск.")
+            return
+        }
+        if (!config.mechanicLock.blockedInventories.contains(event.inventory.type.name)) {
+            debug.info("Инвентарь ${event.inventory.type.name} не в блок-листе, пропуск.")
+            return
+        }
         event.isCancelled = true
-        debug.info("Mechanic lock: blocked inventory ${event.inventory.type.name} for ${player.name}.")
+        debug.info("Мех-лок: заблокирован инвентарь ${event.inventory.type.name} для ${player.name}.")
         manager.addActivity(point, config.mechanicLock.activityGain)
         MessageUtil.send(player, config.messages.deny)
         openSubstituteInventory(player)
@@ -106,17 +131,27 @@ class EchoListener(
         val point = manager.isInPoint(event.block.location) ?: return
         if (point.distortion == DistortionType.MECHANIC_LOCK && config.mechanicLock.blockedBlocks.contains(event.block.type)) {
             event.isCancelled = true
-            debug.info("Mechanic lock: blocked placement ${event.block.type} for ${event.player.name}.")
+            debug.info("Мех-лок: запрет размещения ${event.block.type} для ${event.player.name}.")
             manager.addActivity(point, config.mechanicLock.activityGain)
             MessageUtil.send(event.player, config.messages.deny)
             openSubstituteInventory(event.player)
             knockback(event.player)
             return
         }
-        if (point.distortion != DistortionType.PLACEMENT_DECAY || !config.placementDecay.enabled) return
-        if (!config.placementDecay.whitelist.contains(event.block.type)) return
-        if (random.nextDouble() > config.placementDecay.chance) return
-        debug.info("Placement decay scheduled for ${event.block.type} at ${event.block.x},${event.block.y},${event.block.z}.")
+        if (point.distortion != DistortionType.PLACEMENT_DECAY || !config.placementDecay.enabled) {
+            debug.info("Декей размещения: искажение=${point.distortion}, enabled=${config.placementDecay.enabled}, пропуск.")
+            return
+        }
+        if (!config.placementDecay.whitelist.contains(event.block.type)) {
+            debug.info("Декей размещения: блок ${event.block.type} не в whitelist, пропуск.")
+            return
+        }
+        val decayRoll = random.nextDouble()
+        if (decayRoll > config.placementDecay.chance) {
+            debug.info("Декей размещения: шанс не сработал (roll=$decayRoll, шанс=${config.placementDecay.chance}).")
+            return
+        }
+        debug.info("Декей размещения запланирован для ${event.block.type} на ${event.block.x},${event.block.y},${event.block.z}.")
         manager.scheduleDecay(point, event.player.uniqueId, event.block.location, event.block.type)
         manager.addActivity(point, config.placementDecay.activityGain)
     }
@@ -125,11 +160,17 @@ class EchoListener(
     fun onInteract(event: PlayerInteractEvent) {
         val player = event.player
         val point = manager.isInPoint(player.location) ?: return
-        if (point.distortion != DistortionType.MECHANIC_LOCK) return
+        if (point.distortion != DistortionType.MECHANIC_LOCK) {
+            debug.info("Взаимодействие: точка ${point.id} без мех-лока (${point.distortion}), пропуск.")
+            return
+        }
         val clicked = event.clickedBlock ?: return
-        if (!config.mechanicLock.blockedBlocks.contains(clicked.type)) return
+        if (!config.mechanicLock.blockedBlocks.contains(clicked.type)) {
+            debug.info("Взаимодействие: блок ${clicked.type} не в блок-листе, пропуск.")
+            return
+        }
         event.isCancelled = true
-        debug.info("Mechanic lock: blocked interaction with ${clicked.type} for ${player.name}.")
+        debug.info("Мех-лок: запрет взаимодействия с ${clicked.type} для ${player.name}.")
         manager.addActivity(point, config.mechanicLock.activityGain)
         MessageUtil.send(player, config.messages.deny)
         openSubstituteInventory(player)
@@ -153,14 +194,14 @@ class EchoListener(
 
         if (candidates.isEmpty()) {
             player.openInventory(player.inventory)
-            debug.info("Opened player inventory as substitute for ${player.name}.")
+            debug.info("Открыт инвентарь игрока как замена для ${player.name}.")
             return
         }
 
         val type = candidates.random()
         val inventory = Bukkit.createInventory(player, type)
         player.openInventory(inventory)
-        debug.info("Opened substitute inventory ${type.name} for ${player.name}.")
+        debug.info("Открыт заменяющий инвентарь ${type.name} для ${player.name}.")
     }
 
 
@@ -168,6 +209,6 @@ class EchoListener(
         if (!config.mechanicLock.knockbackEnabled) return
         val direction = player.location.direction.multiply(-config.mechanicLock.knockbackStrength)
         player.velocity = Vector(direction.x, 0.3, direction.z)
-        debug.info("Applied knockback to ${player.name}.")
+        debug.info("Откидывание применено к ${player.name}.")
     }
 }
