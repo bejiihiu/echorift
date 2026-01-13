@@ -55,6 +55,9 @@ points:
 
 hints:
   interval-seconds: 600
+  near-radius: 24.0
+  far-radius: 96.0
+  near-frequency-multiplier: 2.0
 
 zone-effects:
   particle:
