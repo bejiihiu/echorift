@@ -122,6 +122,8 @@ class WhisperSettings(plugin: Main) {
 class ZoneEffects(plugin: Main) {
     val particle: ParticleSettings = ParticleSettings(plugin.config.getConfigurationSection("zone-effects.particle"))
     val sound: SoundSettings = SoundSettings(plugin.config.getConfigurationSection("zone-effects.sound"))
+    val playerWeather: PlayerWeatherSettings =
+        PlayerWeatherSettings(plugin.config.getConfigurationSection("zone-effects.player-weather"))
     val playerAura: PlayerAuraSettings =
         PlayerAuraSettings(plugin.config.getConfigurationSection("zone-effects.player-aura"))
     val playerWeather: PlayerWeatherChaosSettings =
@@ -191,6 +193,10 @@ class SoundSettings(section: ConfigurationSection?) {
     }
 }
 
+class PlayerWeatherSettings(section: ConfigurationSection?) {
+    val mode: String = section?.getString("mode") ?: "invert"
+    val stormChance: Double = (section?.getDouble("storm-chance", 0.2) ?: 0.2).coerceIn(0.0, 1.0)
+    val forceDurationSeconds: Long = (section?.getLong("force-duration-seconds", 20) ?: 20).coerceAtLeast(1)
 class PlayerAuraSettings(section: ConfigurationSection?) {
     val enabled: Boolean = section?.getBoolean("enabled", true) ?: true
     val intervalSeconds: Long = section?.getLong("interval-seconds", 18) ?: 18
