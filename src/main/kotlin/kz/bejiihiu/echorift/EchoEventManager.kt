@@ -4,9 +4,14 @@ import io.papermc.paper.threadedregions.scheduler.ScheduledTask
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.WeatherType
+import org.bukkit.NamespacedKey
 import org.bukkit.World
+import org.bukkit.WeatherType
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
+import org.bukkit.potion.PotionEffect
+import org.bukkit.potion.PotionEffectType
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -29,11 +34,32 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
     private var spawnTask: ScheduledTask? = null
     private var ttlTask: ScheduledTask? = null
     private var hintTask: ScheduledTask? = null
+    private var whisperTask: ScheduledTask? = null
     private var particleTask: ScheduledTask? = null
     private var soundTask: ScheduledTask? = null
     private var stayTask: ScheduledTask? = null
     private var hungerTask: ScheduledTask? = null
     private var tickBoostTask: ScheduledTask? = null
+    private var playerWeatherTask: ScheduledTask? = null
+
+    private val forcedPlayerWeather = ConcurrentHashMap<UUID, ForcedWeather>()
+
+    private enum class PlayerWeatherMode {
+        INVERT,
+        RANDOM,
+        MIXED
+    }
+
+    private enum class PlayerWeatherModel {
+        CLEAR,
+        DOWNFALL,
+        STORM
+    }
+
+    private data class ForcedWeather(val model: PlayerWeatherModel, val expiresAt: Instant)
+    private var auraTask: ScheduledTask? = null
+    private var weatherTask: ScheduledTask? = null
+    private var distortionTask: ScheduledTask? = null
 
     var eventActive: Boolean = false
         private set
@@ -113,6 +139,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         debug.info("Событие остановлено, схлопываем все точки.")
         collapseAll(CollapseReason.EVENT_END)
         cancelTasks()
+        clearPlayerWeatherOverrides()
         MessageUtil.broadcast(config.messages.end)
     }
 
@@ -120,6 +147,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         if (persistState) {
             debug.info("Выключение: режим персистентности, отменяем задачи без схлопывания точек.")
             cancelTasks()
+            clearPlayerWeatherOverrides()
             return
         }
         debug.info("Выключение: режим сессии, останавливаем событие.")
@@ -150,9 +178,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         val set = playerZones.computeIfAbsent(player.uniqueId) { mutableSetOf() }
         if (set.add(point.id)) {
             debug.info("Игрок ${player.name} вошёл в точку ${point.id} (искажение=${point.distortion}).")
-            if (config.messages.enter.isNotBlank()) {
-                MessageUtil.send(player, config.messages.enter)
-            }
+            sendEnterMessage(player)
             addActivity(point, config.points.enterCost)
         }
     }
@@ -160,6 +186,9 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
     fun handlePlayerExit(player: Player, point: EchoPoint) {
         playerZones[player.uniqueId]?.remove(point.id)
         debug.info("Игрок ${player.name} вышел из точки ${point.id}.")
+        if (config.zoneEffects.playerWeather.enabled) {
+            player.resetPlayerWeather()
+        }
     }
 
     fun addActivity(point: EchoPoint, amount: Int) {
@@ -228,27 +257,87 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
 
     fun scheduleTasks() {
         cancelTasks()
-        debug.info("Планируем задачи: spawn=${config.points.spawnIntervalSeconds}с hint=${config.hints.intervalSeconds}с particle=${config.zoneEffects.particle.intervalSeconds}с sound=${config.zoneEffects.sound.intervalSeconds}с stay=${config.points.stayIntervalSeconds}с hunger=${config.hungerDrift.intervalSeconds}с.")
+        debug.info("Планируем задачи: spawn=${config.points.spawnIntervalSeconds}с hint=${config.hints.intervalSeconds}с whisper=${config.whispers.intervalSeconds}с particle=${config.zoneEffects.particle.intervalSeconds}с sound=${config.zoneEffects.sound.intervalSeconds}с stay=${config.points.stayIntervalSeconds}с hunger=${config.hungerDrift.intervalSeconds}с.")
         spawnTask = globalScheduler.runAtFixedRate(plugin, { _ -> spawnPoint() }, 20, config.points.spawnIntervalSeconds * 20)
         ttlTask = globalScheduler.runAtFixedRate(plugin, { _ -> checkTtl() }, 40, 40)
         hintTask = globalScheduler.runAtFixedRate(plugin, { _ -> broadcastHint() }, config.hints.intervalSeconds * 20, config.hints.intervalSeconds * 20)
+        if (config.whispers.intervalSeconds > 0 && config.messages.whispers.isNotEmpty()) {
+            whisperTask = globalScheduler.runAtFixedRate(
+                plugin,
+                { _ -> whisperInZones() },
+                config.whispers.intervalSeconds * 20,
+                config.whispers.intervalSeconds * 20
+            )
+        } else {
+            debug.info("Шёпоты отключены: interval=${config.whispers.intervalSeconds}, messages=${config.messages.whispers.size}.")
+        }
         particleTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickZoneParticles() }, 40, config.zoneEffects.particle.intervalSeconds * 20)
         soundTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickZoneSounds() }, 40, config.zoneEffects.sound.intervalSeconds * 20)
         stayTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickStayActivity() }, config.points.stayIntervalSeconds * 20, config.points.stayIntervalSeconds * 20)
         hungerTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickHunger() }, config.hungerDrift.intervalSeconds * 20, config.hungerDrift.intervalSeconds * 20)
         tickBoostTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickRandomBoost() }, 20, 20)
+        playerWeatherTask = globalScheduler.runAtFixedRate(plugin, { _ -> tickPlayerWeatherChaos() }, 20, 20)
+        if (config.zoneEffects.playerAura.enabled && config.zoneEffects.playerAura.intervalSeconds > 0) {
+            auraTask = globalScheduler.runAtFixedRate(
+                plugin,
+                { _ -> tickPlayerAura() },
+                40,
+                config.zoneEffects.playerAura.intervalSeconds * 20
+            )
+        } else {
+            debug.info("Аура отключена: enabled=${config.zoneEffects.playerAura.enabled} interval=${config.zoneEffects.playerAura.intervalSeconds}.")
+        }
+        if (config.zoneEffects.playerWeather.enabled && config.zoneEffects.playerWeather.intervalSeconds > 0) {
+            weatherTask = globalScheduler.runAtFixedRate(
+                plugin,
+                { _ -> tickPlayerWeatherChaos() },
+                40,
+                config.zoneEffects.playerWeather.intervalSeconds * 20
+            )
+        } else {
+            debug.info("Погодная вакханалия отключена: enabled=${config.zoneEffects.playerWeather.enabled} interval=${config.zoneEffects.playerWeather.intervalSeconds}.")
+        }
+        if (config.zoneEffects.playerDistortion.enabled && config.zoneEffects.playerDistortion.intervalSeconds > 0) {
+            distortionTask = globalScheduler.runAtFixedRate(
+                plugin,
+                { _ -> tickPlayerDistortion() },
+                40,
+                config.zoneEffects.playerDistortion.intervalSeconds * 20
+            )
+        } else {
+            debug.info("Искажения игроков отключены: enabled=${config.zoneEffects.playerDistortion.enabled} interval=${config.zoneEffects.playerDistortion.intervalSeconds}.")
+        }
     }
 
     private fun cancelTasks() {
-        listOf(spawnTask, ttlTask, hintTask, particleTask, soundTask, stayTask, hungerTask, tickBoostTask).forEach { it?.cancel() }
+        listOf(
+            spawnTask,
+            ttlTask,
+            hintTask,
+            whisperTask,
+            particleTask,
+            soundTask,
+            stayTask,
+            hungerTask,
+            tickBoostTask,
+            playerWeatherTask
+            auraTask,
+            weatherTask,
+            distortionTask
+        ).forEach { it?.cancel() }
         spawnTask = null
         ttlTask = null
         hintTask = null
+        whisperTask = null
         particleTask = null
         soundTask = null
         stayTask = null
         hungerTask = null
         tickBoostTask = null
+        playerWeatherTask = null
+        auraTask = null
+        weatherTask = null
+        distortionTask = null
         debug.info("Все запланированные задачи отменены.")
     }
 
@@ -275,8 +364,9 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
             debug.info("Спавн пропущен: достигнут лимит активных точек (${points.size}/${config.points.maxActive}).")
             return
         }
-        val world = pickWorld() ?: return
-        val location = pickLocation(world) ?: return
+        val target = pickSpawnTarget() ?: return
+        val world = target.world
+        val location = target.location
         if (!isLocationValid(location, world)) {
             debug.info("Спавн отклонён: невалидная локация ${location.blockX},${location.blockZ} в ${world.name}.")
             return
@@ -289,6 +379,19 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         val point = EchoPoint(UUID.randomUUID(), world.name, location.blockX, location.blockZ, now, now.plusSeconds(ttlSeconds.toLong()), distortion, activityLimit, 0)
         points[point.id] = point
         debug.info("Создана точка ${point.id} в ${point.centerX},${point.centerZ} (${point.worldName}) искажение=${point.distortion} ttl=${ttlSeconds}с лимит=$activityLimit.")
+    }
+
+    private fun pickSpawnTarget(): SpawnTarget? {
+        return when (config.points.coordinateMode.lowercase()) {
+            "near-players" -> pickNearPlayerTarget() ?: pickFallbackTarget()
+            else -> pickFallbackTarget()
+        }
+    }
+
+    private fun pickFallbackTarget(): SpawnTarget? {
+        val world = pickWorld() ?: return null
+        val location = pickLocation(world) ?: return null
+        return SpawnTarget(world, location)
     }
 
     private fun pickWorld(): World? {
@@ -336,6 +439,26 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                 Location(world, x.toDouble(), 64.0, z.toDouble())
             }
         }
+    }
+
+    private fun pickNearPlayerTarget(): SpawnTarget? {
+        val eligiblePlayers = Bukkit.getOnlinePlayers().filter { player ->
+            config.points.allowedWorlds.isEmpty() || config.points.allowedWorlds.contains(player.world.name)
+        }
+        if (eligiblePlayers.isEmpty()) {
+            debug.info("near-players: онлайн пуст или миры не подходят, фоллбек.")
+            return null
+        }
+        val player = eligiblePlayers.random()
+        val world = player.world
+        val min = config.points.nearPlayer.minDistance
+        val max = config.points.nearPlayer.maxDistance
+        val radius = random.nextInt(min, max + 1).toDouble()
+        val angle = random.nextDouble(0.0, Math.PI * 2)
+        val x = (player.location.x + cos(angle) * radius).toInt()
+        val z = (player.location.z + sin(angle) * radius).toInt()
+        debug.info("near-players: игрок=${player.name} мир=${world.name} x=$x z=$z r=$radius.")
+        return SpawnTarget(world, Location(world, x.toDouble(), 64.0, z.toDouble()))
     }
 
     private fun isLocationValid(location: Location, world: World): Boolean {
@@ -409,6 +532,27 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         MessageUtil.broadcast(message)
     }
 
+    private fun whisperInZones() {
+        if (!eventActive) {
+            debug.info("Шёпот не отправлен: событие не активно.")
+            return
+        }
+        val whispers = config.messages.whispers
+        if (whispers.isEmpty()) {
+            debug.info("Шёпоты отключены: список пуст.")
+            return
+        }
+        debug.info("Шёпоты: рассылка локальных сообщений по точкам.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location) ?: return@run
+                val message = config.messages.whisperPrefix + whispers.random()
+                MessageUtil.send(player, message)
+                debug.info("Шёпот отправлен игроку ${player.name} в точке ${point.id}.")
+            }
+        }
+    }
+
     private fun tickZoneParticles() {
         if (!eventActive) {
             debug.info("Частицы не отправлены: событие не активно.")
@@ -440,6 +584,17 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                         )
                     }
                 }
+        points.values.forEach { point ->
+            val world = Bukkit.getWorld(point.worldName) ?: return@forEach
+
+            val location = mysticScatterLocation(
+                world,
+                point.centerX,
+                point.centerZ,
+                config.zoneEffects.particle.scatterRadius
+            )
+            Bukkit.getRegionScheduler().run(plugin, location) { _ ->
+                world.spawnParticle(config.zoneEffects.particle.type, location, config.zoneEffects.particle.count, config.zoneEffects.particle.radius, 1.0, config.zoneEffects.particle.radius)
             }
         }
     }
@@ -495,6 +650,96 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         val fraction = multiplier - whole
         if (fraction > 0.0 && random.nextDouble() < fraction) {
             action()
+        points.values.forEach { point ->
+            val world = Bukkit.getWorld(point.worldName) ?: return@forEach
+            val location = mysticScatterLocation(
+                world,
+                point.centerX,
+                point.centerZ,
+                config.zoneEffects.sound.scatterRadius
+            )
+            Bukkit.getRegionScheduler().run(plugin, location) { _ ->
+                world.playSound(location, config.zoneEffects.sound.type, config.zoneEffects.sound.volume, config.zoneEffects.sound.pitch)
+            }
+        }
+    }
+
+    private fun tickPlayerAura() {
+        val aura = config.zoneEffects.playerAura
+        if (!eventActive || !aura.enabled) {
+            debug.info("Аура: событие активно=$eventActive, enabled=${aura.enabled}.")
+            return
+        }
+        debug.info("Аура: отправка эффектов вокруг игроков.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location) ?: return@run
+                val location = player.location.add(0.0, 0.8, 0.0)
+                player.world.spawnParticle(
+                    aura.particle.type,
+                    location,
+                    aura.particle.count,
+                    aura.particle.radius,
+                    0.6,
+                    aura.particle.radius
+                )
+                player.world.playSound(
+                    location,
+                    aura.sound.type,
+                    aura.sound.volume,
+                    aura.sound.pitch
+                )
+                debug.info("Аура: игрок ${player.name} внутри точки ${point.id}.")
+            }
+        }
+    }
+
+    private fun tickPlayerWeatherChaos() {
+        val chaos = config.zoneEffects.playerWeather
+        if (!eventActive || !chaos.enabled) {
+            debug.info("Погода: событие активно=$eventActive, enabled=${chaos.enabled}.")
+            return
+        }
+        debug.info("Погода: вакханалия для игроков в точках.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location) ?: return@run
+                if (random.nextDouble() > chaos.chance) return@run
+                val weather = if (random.nextBoolean()) WeatherType.DOWNFALL else WeatherType.CLEAR
+                player.setPlayerWeather(weather)
+                debug.info("Погода: ${player.name} в точке ${point.id} => $weather.")
+            }
+        }
+    }
+
+    private fun tickPlayerDistortion() {
+        val distortion = config.zoneEffects.playerDistortion
+        if (!eventActive || !distortion.enabled) {
+            debug.info("Искажения: событие активно=$eventActive, enabled=${distortion.enabled}.")
+            return
+        }
+        if (distortion.effects.isEmpty()) {
+            debug.info("Искажения: список эффектов пуст.")
+            return
+        }
+        debug.info("Искажения: применяем случайные эффекты игрокам в точках.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location) ?: return@run
+                if (random.nextDouble() > distortion.chance) return@run
+                val effectType = pickEffectType(distortion.effects) ?: return@run
+                val duration = distortion.durationSeconds.coerceAtLeast(1) * 20
+                val effect = PotionEffect(
+                    effectType,
+                    duration,
+                    distortion.amplifier.coerceAtLeast(0),
+                    distortion.ambient,
+                    distortion.showParticles,
+                    distortion.showIcon
+                )
+                player.addPotionEffect(effect)
+                debug.info("Искажения: ${player.name} получил ${effectType.key}.")
+            }
         }
     }
 
@@ -518,6 +763,37 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         }
     }
 
+    private fun tickPlayerWeatherChaos() {
+        if (!eventActive) {
+            debug.info("Погода игроков не обновлена: событие не активно.")
+            return
+        }
+        val settings = config.zoneEffects.playerWeather
+        val mode = parsePlayerWeatherMode(settings.mode)
+        val now = Instant.now()
+        debug.info("Погода игроков: режим=$mode длительность=${settings.forceDurationSeconds}с онлайн=${Bukkit.getOnlinePlayers().size}.")
+        for (player in Bukkit.getOnlinePlayers()) {
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                val point = isInPoint(player.location)
+                if (point == null) {
+                    if (forcedPlayerWeather.remove(player.uniqueId) != null) {
+                        player.resetPlayerWeather()
+                        debug.info("Погода игроков сброшена для ${player.name}: вне зоны.")
+                    }
+                    return@run
+                }
+                val existing = forcedPlayerWeather[player.uniqueId]
+                if (existing != null && now.isBefore(existing.expiresAt)) {
+                    return@run
+                }
+                val model = pickPlayerWeatherModel(player.world, mode, settings.stormChance)
+                applyPlayerWeatherModel(player, model, settings.forceDurationSeconds)
+                forcedPlayerWeather[player.uniqueId] = ForcedWeather(model, now.plusSeconds(settings.forceDurationSeconds))
+                debug.info("Погода игроков применена: ${player.name} -> $model до ${forcedPlayerWeather[player.uniqueId]?.expiresAt}.")
+            }
+        }
+    }
+
     private fun tickHunger() {
         if (!eventActive || !config.hungerDrift.enabled) {
             debug.info("Голод не обновлён: событие активно=$eventActive, hungerDrift=${config.hungerDrift.enabled}.")
@@ -531,6 +807,63 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                 player.exhaustion = (player.exhaustion + config.hungerDrift.exhaustionDelta).coerceAtLeast(0f)
                 debug.info("Голод: ${player.name} усталость +${config.hungerDrift.exhaustionDelta}.")
                 addActivity(point, config.hungerDrift.activityGain)
+            }
+        }
+    }
+
+    private fun clearPlayerWeatherOverrides() {
+        if (forcedPlayerWeather.isEmpty()) return
+        forcedPlayerWeather.keys.forEach { playerId ->
+            val player = Bukkit.getPlayer(playerId) ?: return@forEach
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                player.resetPlayerWeather()
+            }
+        }
+        forcedPlayerWeather.clear()
+        debug.info("Форсированная погода игроков сброшена.")
+    }
+
+    private fun parsePlayerWeatherMode(raw: String): PlayerWeatherMode =
+        when (raw.trim().lowercase()) {
+            "invert" -> PlayerWeatherMode.INVERT
+            "random" -> PlayerWeatherMode.RANDOM
+            "mixed" -> PlayerWeatherMode.MIXED
+            else -> PlayerWeatherMode.INVERT
+        }
+
+    private fun pickPlayerWeatherModel(world: World, mode: PlayerWeatherMode, stormChance: Double): PlayerWeatherModel {
+        val clampedStormChance = stormChance.coerceIn(0.0, 1.0)
+        return when (mode) {
+            PlayerWeatherMode.INVERT -> invertPlayerWeather(world)
+            PlayerWeatherMode.RANDOM -> randomPlayerWeather(clampedStormChance)
+            PlayerWeatherMode.MIXED -> if (random.nextBoolean()) invertPlayerWeather(world) else randomPlayerWeather(clampedStormChance)
+        }
+    }
+
+    private fun invertPlayerWeather(world: World): PlayerWeatherModel =
+        if (world.hasStorm() || world.isThundering) {
+            PlayerWeatherModel.CLEAR
+        } else {
+            PlayerWeatherModel.DOWNFALL
+        }
+
+    private fun randomPlayerWeather(stormChance: Double): PlayerWeatherModel {
+        val roll = random.nextDouble()
+        if (roll < stormChance) return PlayerWeatherModel.STORM
+        return if (random.nextBoolean()) PlayerWeatherModel.CLEAR else PlayerWeatherModel.DOWNFALL
+    }
+
+    private fun applyPlayerWeatherModel(player: Player, model: PlayerWeatherModel, durationSeconds: Long) {
+        when (model) {
+            PlayerWeatherModel.CLEAR -> player.setPlayerWeather(WeatherType.CLEAR)
+            PlayerWeatherModel.DOWNFALL -> player.setPlayerWeather(WeatherType.DOWNFALL)
+            PlayerWeatherModel.STORM -> {
+                player.setPlayerWeather(WeatherType.DOWNFALL)
+                val ticks = (durationSeconds * 20).toInt().coerceAtLeast(1)
+                player.world.setStorm(true)
+                player.world.setThundering(true)
+                player.world.weatherDuration = ticks
+                player.world.thunderDuration = ticks
             }
         }
     }
@@ -631,4 +964,35 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         debug.info("Публичный коллапс всех точек, причина=$reason.")
         collapseAll(reason)
     }
+
+    private fun sendEnterMessage(player: Player) {
+        val messages = config.messages.enterMessages
+        if (messages.isNotEmpty()) {
+            MessageUtil.send(player, messages.random())
+            return
+        }
+        if (config.messages.enter.isNotBlank()) {
+            MessageUtil.send(player, config.messages.enter)
+        }
+    }
+
+    private fun mysticScatterLocation(world: World, centerX: Int, centerZ: Int, scatterRadius: Double): Location {
+        val radius = if (scatterRadius <= 0.0) 0.0 else random.nextDouble(0.0, scatterRadius)
+        val angle = random.nextDouble(0.0, Math.PI * 2)
+        val offsetX = cos(angle) * radius
+        val offsetZ = sin(angle) * radius
+        val yBase = world.spawnLocation.y
+        val yOffset = random.nextDouble(-1.5, 2.0)
+        return Location(world, centerX + offsetX, yBase + yOffset, centerZ + offsetZ)
+    }
+
+    private fun pickEffectType(candidates: Set<String>): PotionEffectType? {
+        val raw = candidates.random()
+        val key = NamespacedKey.fromString(raw.lowercase())
+        val byKey = key?.let { PotionEffectType.getByKey(it) }
+        if (byKey != null) return byKey
+        return PotionEffectType.getByName(raw.uppercase())
+    }
+
+    private data class SpawnTarget(val world: World, val location: Location)
 }

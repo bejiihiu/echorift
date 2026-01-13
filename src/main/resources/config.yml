@@ -2,15 +2,24 @@ messages:
   start: "<gold><bold>Эхо раскола</bold> проснулось. В мире появились странные зоны..."
   end: "<gray>Шум стихает. <bold>Эхо раскола</bold> завершилось."
   enter: "<yellow>Воздух здесь странный..."
+  enter-messages:
+    - "<dark_purple>Волосы встают дыбом. Здесь что-то дышит.</dark_purple>"
+    - "<dark_aqua>Тишина гулкая, будто мир слушает.</dark_aqua>"
+    - "<gray>Эхо цепляется за мысли и не хочет отпускать.</gray>"
   deny: "<red>Механика отзывается искажением."
   ore-reveal: "<gray>Руда откликается иначе...</gray>"
   collapse-local: "<gray>Эхо затихает в этой зоне."
   collapse-global: "<gray>Одна из точек эха схлопнулась."
   hint-prefix: "<dark_aqua>Эхо:</dark_aqua> "
+  whisper-prefix: "<dark_purple>Шёпот:</dark_purple> "
   hints:
     - "Слухи говорят о тихом гуле где-то в лесах."
     - "Кто-то видел странные частицы у воды."
     - "Ночью воздух становится тяжелее на равнинах."
+  whispers:
+    - "Камни тут помнят шаги и считают дыхание."
+    - "Тень двигается не туда, куда должна."
+    - "Чьи-то мысли звучат слишком громко."
 
 debug:
   enabled: true
@@ -22,12 +31,15 @@ event:
   persistent: false
 
 points:
-  max-active: 3
-  spawn-interval-seconds: 1800
+  max-active: 6
+  spawn-interval-seconds: 900
   allowed-worlds:
     - "world"
   min-distance-blocks: 500
-  coordinate-mode: "random-range"
+  coordinate-mode: "near-players"
+  near-player:
+    min-distance: 120
+    max-distance: 420
   custom-list:
     - "250, -120"
   random-range:
@@ -59,17 +71,58 @@ hints:
   far-radius: 96.0
   near-frequency-multiplier: 2.0
 
+whispers:
+  interval-seconds: 360
+
 zone-effects:
   particle:
     type: "PORTAL"
     count: 16
     radius: 6.0
+    scatter-radius: 8.0
     interval-seconds: 12
   sound:
     type: "BLOCK_AMETHYST_BLOCK_CHIME"
     volume: 0.8
     pitch: 1.2
+    scatter-radius: 6.0
     interval-seconds: 20
+  player-weather:
+    mode: "invert"
+    storm-chance: 0.2
+    force-duration-seconds: 20
+  player-aura:
+    enabled: true
+    interval-seconds: 18
+    particle:
+      type: "REVERSE_PORTAL"
+      count: 6
+      radius: 0.6
+    sound:
+      type: "BLOCK_SCULK_BLOCK_HIT"
+      volume: 0.4
+      pitch: 0.8
+  player-weather:
+    enabled: true
+    interval-seconds: 45
+    chance: 0.35
+  player-distortion:
+    enabled: true
+    interval-seconds: 30
+    chance: 0.35
+    duration-seconds: 6
+    amplifier: 0
+    ambient: true
+    show-particles: true
+    show-icon: false
+    effects:
+      - BLINDNESS
+      - SLOW
+      - LEVITATION
+      - JUMP_BOOST
+      - GLOWING
+      - CONFUSION
+      - SLOW_FALLING
 
 activity:
   enter-cost: 0
@@ -123,16 +176,52 @@ mechanic-lock:
     - ANVIL
     - ENCHANTING
     - SHULKER_BOX
+    - WORKBENCH
+    - FURNACE
+    - BLAST_FURNACE
+    - SMOKER
+    - LOOM
+    - CARTOGRAPHY
+    - GRINDSTONE
+    - STONECUTTER
+    - SMITHING
+    - BREWING
   blocked-blocks:
     - ENDER_CHEST
     - ANVIL
     - ENCHANTING_TABLE
+    - CRAFTING_TABLE
+    - FURNACE
+    - BLAST_FURNACE
+    - SMOKER
+    - LOOM
+    - CARTOGRAPHY_TABLE
+    - GRINDSTONE
+    - STONECUTTER
+    - SMITHING_TABLE
+    - BREWING_STAND
     - CHIPPED_ANVIL
     - DAMAGED_ANVIL
   substitute-inventories:
     - CRAFTING
     - CARTOGRAPHY
     - LOOM
+  random-inventories:
+    - CRAFTING
+    - FURNACE
+    - BLAST_FURNACE
+    - SMOKER
+    - GRINDSTONE
+    - LOOM
+    - CARTOGRAPHY
+    - STONECUTTER
+    - BREWING
+    - LOOM
+    - CARTOGRAPHY
+    - GRINDSTONE
+    - STONECUTTER
+    - SMITHING
+    - ENCHANTING
 
 hunger-drift:
   enabled: true
