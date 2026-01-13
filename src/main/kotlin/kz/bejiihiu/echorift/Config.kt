@@ -1,13 +1,15 @@
 package kz.bejiihiu.echorift
 
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.Particle
+import org.bukkit.Registry
 import org.bukkit.Sound
 import org.bukkit.configuration.ConfigurationSection
 import java.time.LocalTime
 import java.time.ZoneId
 
-class PluginConfig(private val plugin: Main) {
+class PluginConfig(plugin: Main) {
     val debug: DebugSettings = DebugSettings(plugin)
     val messages: Messages = Messages(plugin)
     val event: EventSettings = EventSettings(plugin)
@@ -21,11 +23,11 @@ class PluginConfig(private val plugin: Main) {
     val placementDecay: PlacementDecaySettings = PlacementDecaySettings(plugin)
 }
 
-class DebugSettings(private val plugin: Main) {
+class DebugSettings(plugin: Main) {
     val enabled: Boolean = plugin.config.getBoolean("debug.enabled", true)
 }
 
-class Messages(private val plugin: Main) {
+class Messages(plugin: Main) {
     val start: String = plugin.config.getString("messages.start") ?: ""
     val end: String = plugin.config.getString("messages.end") ?: ""
     val enter: String = plugin.config.getString("messages.enter") ?: ""
@@ -37,7 +39,7 @@ class Messages(private val plugin: Main) {
     val hints: List<String> = plugin.config.getStringList("messages.hints")
 }
 
-class EventSettings(private val plugin: Main) {
+class EventSettings(plugin: Main) {
     val autoStart: Boolean = plugin.config.getBoolean("event.auto-start", true)
     val startTime: LocalTime = LocalTime.parse(plugin.config.getString("event.start-time") ?: "18:00")
     val zoneId: ZoneId = when (val value = plugin.config.getString("event.timezone") ?: "system") {
@@ -99,11 +101,11 @@ class RingSettings(section: ConfigurationSection?) {
     val maxRadius: Int = section?.getInt("max-radius", 1500) ?: 1500
 }
 
-class HintSettings(private val plugin: Main) {
+class HintSettings(plugin: Main) {
     val intervalSeconds: Long = plugin.config.getLong("hints.interval-seconds", 600)
 }
 
-class ZoneEffects(private val plugin: Main) {
+class ZoneEffects(plugin: Main) {
     val particle: ParticleSettings = ParticleSettings(plugin.config.getConfigurationSection("zone-effects.particle"))
     val sound: SoundSettings = SoundSettings(plugin.config.getConfigurationSection("zone-effects.sound"))
 }
@@ -116,10 +118,55 @@ class ParticleSettings(section: ConfigurationSection?) {
 }
 
 class SoundSettings(section: ConfigurationSection?) {
-    val type: Sound = Sound.valueOf(section?.getString("type") ?: "BLOCK_AMETHYST_BLOCK_CHIME")
-    val volume: Float = (section?.getDouble("volume", 0.8) ?: 0.8).toFloat()
-    val pitch: Float = (section?.getDouble("pitch", 1.2) ?: 1.2).toFloat()
-    val intervalSeconds: Long = section?.getLong("interval-seconds", 20) ?: 20
+
+    val type: Sound = parseSound(section?.getString("type")) ?: DEFAULT_SOUND
+    val volume: Float = (section?.getDouble("volume", DEFAULT_VOLUME) ?: DEFAULT_VOLUME).toFloat()
+    val pitch: Float = (section?.getDouble("pitch", DEFAULT_PITCH) ?: DEFAULT_PITCH).toFloat()
+    val intervalSeconds: Long =
+        section?.getLong("interval-seconds", DEFAULT_INTERVAL_SECONDS) ?: DEFAULT_INTERVAL_SECONDS
+
+    companion object {
+        private const val DEFAULT_VOLUME = 0.8
+        private const val DEFAULT_PITCH = 1.2
+        private const val DEFAULT_INTERVAL_SECONDS = 20L
+        private val DEFAULT_SOUND: Sound = Sound.BLOCK_AMETHYST_BLOCK_CHIME
+
+        /**
+         * Поддерживаем форматы:
+         *  - "minecraft:block.amethyst_block.chime" (рекомендуемый)
+         *  - "block.amethyst_block.chime"          (подразумеваем minecraft:)
+         *  - "BLOCK_AMETHYST_BLOCK_CHIME"          (legacy enum-имя, через рефлексию)
+         */
+        fun parseSound(raw: String?): Sound? {
+            val input = raw?.trim().orEmpty()
+            if (input.isEmpty()) return null
+
+            // 1) Попытка как key (registry-first подход).
+            resolveByKey(input)?.let { return it }
+
+            // 2) Legacy enum-имя (без Sound.valueOf()).
+            resolveByLegacyConstant(input)?.let { return it }
+
+            return null
+        }
+
+        private fun resolveByKey(input: String): Sound? {
+            val keyString = when {
+                ':' in input -> input.lowercase()                  // minecraft:...
+                '.' in input -> "minecraft:${input.lowercase()}"   // block.amethyst...
+                else -> return null                                // не key-формат
+            }
+
+            val key = NamespacedKey.fromString(keyString) ?: return null
+            return Registry.SOUND_EVENT.get(key)
+        }
+
+        private fun resolveByLegacyConstant(input: String): Sound? =
+            runCatching {
+                val field = Sound::class.java.getField(input.uppercase())
+                field.get(null) as? Sound
+            }.getOrNull()
+    }
 }
 
 class OreDropShiftSettings(private val plugin: Main) {
@@ -147,7 +194,7 @@ class OreDropShiftSettings(private val plugin: Main) {
 
 class DropMapping(val drop: Material, val min: Int, val max: Int, val multiplier: Double)
 
-class MechanicLockSettings(private val plugin: Main) {
+class MechanicLockSettings(plugin: Main) {
     val enabled: Boolean = plugin.config.getBoolean("mechanic-lock.enabled", true)
     val weight: Int = plugin.config.getInt("mechanic-lock.weight", 3)
     val activityGain: Int = plugin.config.getInt("mechanic-lock.activity-gain", 1)
@@ -158,7 +205,7 @@ class MechanicLockSettings(private val plugin: Main) {
     val substituteInventories: List<String> = plugin.config.getStringList("mechanic-lock.substitute-inventories").map { it.uppercase() }
 }
 
-class RandomTickBoostSettings(private val plugin: Main) {
+class RandomTickBoostSettings(plugin: Main) {
     val enabled: Boolean = plugin.config.getBoolean("random-tick-boost.enabled", true)
     val weight: Int = plugin.config.getInt("random-tick-boost.weight", 3)
     val chance: Double = plugin.config.getDouble("random-tick-boost.chance", 0.35)
@@ -168,7 +215,7 @@ class RandomTickBoostSettings(private val plugin: Main) {
     val blocks: Set<Material> = plugin.config.getStringList("random-tick-boost.blocks").mapNotNull { Material.matchMaterial(it) }.toSet()
 }
 
-class HungerDriftSettings(private val plugin: Main) {
+class HungerDriftSettings(plugin: Main) {
     val enabled: Boolean = plugin.config.getBoolean("hunger-drift.enabled", true)
     val weight: Int = plugin.config.getInt("hunger-drift.weight", 3)
     val intervalSeconds: Long = plugin.config.getLong("hunger-drift.interval-seconds", 6)
@@ -176,7 +223,7 @@ class HungerDriftSettings(private val plugin: Main) {
     val activityGain: Int = plugin.config.getInt("hunger-drift.activity-gain", 1)
 }
 
-class PlacementDecaySettings(private val plugin: Main) {
+class PlacementDecaySettings(plugin: Main) {
     val enabled: Boolean = plugin.config.getBoolean("placement-decay.enabled", true)
     val weight: Int = plugin.config.getInt("placement-decay.weight", 2)
     val chance: Double = plugin.config.getDouble("placement-decay.chance", 0.3)

@@ -5,7 +5,7 @@ import java.io.File
 import java.time.Instant
 import java.util.UUID
 
-class PersistenceManager(private val plugin: Main) {
+class PersistenceManager(plugin: Main) {
     private val file = File(plugin.dataFolder, "data.yml")
 
     fun save(state: EventState) {

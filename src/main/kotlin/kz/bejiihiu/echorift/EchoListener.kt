@@ -13,8 +13,8 @@ import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.event.block.BlockDropItemEvent
+import org.bukkit.event.inventory.InventoryType
 import org.bukkit.inventory.ItemStack
-import org.bukkit.inventory.InventoryType
 import org.bukkit.util.Vector
 import kotlin.random.Random
 
@@ -29,7 +29,7 @@ class EchoListener(
     fun onMove(event: PlayerMoveEvent) {
         if (!manager.eventActive) return
         val from = event.from
-        val to = event.to ?: return
+        val to = event.to
         if (from.blockX == to.blockX && from.blockZ == to.blockZ && from.world == to.world) return
         val player = event.player
         val currentPoint = manager.isInPoint(to)
@@ -54,21 +54,21 @@ class EchoListener(
         if (point.distortion != DistortionType.ORE_DROP_SHIFT) return
         val mapping = config.oreDropShift.mappings[event.block.type] ?: return
         if (random.nextDouble() > config.oreDropShift.chance) return
-        debug.info("Ore drop shift triggered at ${event.block.x},${event.block.y},${event.block.z} by ${event.player?.name}.")
+        debug.info("Ore drop shift triggered at ${event.block.x},${event.block.y},${event.block.z} by ${event.player.name}.")
         event.items.clear()
         val count = random.nextInt(mapping.min, mapping.max + 1)
         val total = (count * mapping.multiplier).toInt().coerceAtLeast(1)
         val drop = ItemStack(mapping.drop, total)
         event.block.world.dropItemNaturally(event.block.location, drop)
-        val tool = event.player?.inventory?.itemInMainHand
-        if (tool != null && tool.type != Material.AIR && tool.itemMeta is org.bukkit.inventory.meta.Damageable) {
+        val tool = event.player.inventory.itemInMainHand
+        if (tool.type != Material.AIR && tool.itemMeta is org.bukkit.inventory.meta.Damageable) {
             val meta = tool.itemMeta as org.bukkit.inventory.meta.Damageable
             meta.damage += config.oreDropShift.extraToolDamage
             tool.itemMeta = meta
         }
         if (!config.oreDropShift.masking) {
             val player = event.player
-            if (player != null && config.messages.oreReveal.isNotBlank()) {
+            if (config.messages.oreReveal.isNotBlank()) {
                 MessageUtil.send(player, config.messages.oreReveal)
             }
         }
@@ -137,19 +137,32 @@ class EchoListener(
     }
 
     private fun openSubstituteInventory(player: Player) {
-        val candidates = config.mechanicLock.substituteInventories.mapNotNull { name ->
-            runCatching { InventoryType.valueOf(name) }.getOrNull()
-        }.filterNot { config.mechanicLock.blockedInventories.contains(it.name) }
+        val blocked: Set<String> = config.mechanicLock.blockedInventories
+            .asSequence()
+            .map { it.trim().uppercase() }
+            .toSet()
+
+        val candidates: List<InventoryType> = config.mechanicLock.substituteInventories
+            .asSequence()
+            .mapNotNull { raw ->
+                val name = raw.trim().uppercase() // работает даже если raw был Any?
+                runCatching<InventoryType> { InventoryType.valueOf(name) }.getOrNull()
+            }
+            .filterNot { it.name in blocked }
+            .toList()
+
         if (candidates.isEmpty()) {
             player.openInventory(player.inventory)
             debug.info("Opened player inventory as substitute for ${player.name}.")
             return
         }
+
         val type = candidates.random()
         val inventory = Bukkit.createInventory(player, type)
         player.openInventory(inventory)
         debug.info("Opened substitute inventory ${type.name} for ${player.name}.")
     }
+
 
     private fun knockback(player: Player) {
         if (!config.mechanicLock.knockbackEnabled) return

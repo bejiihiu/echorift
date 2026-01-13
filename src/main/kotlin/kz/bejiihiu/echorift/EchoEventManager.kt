@@ -3,8 +3,10 @@ package kz.bejiihiu.echorift
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask
 import org.bukkit.Bukkit
 import org.bukkit.Location
+import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.entity.Player
+import org.bukkit.inventory.ItemStack
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -90,7 +92,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         eventActive = false
         eventEndsAt = null
         debug.info("Event stopped, collapsing all points.")
-        collapseAll("event-end")
+        collapseAll(CollapseReason.EVENT_END)
         cancelTasks()
         MessageUtil.broadcast(config.messages.end)
     }
@@ -153,28 +155,42 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
 
     private fun notifyCollapse(point: EchoPoint) {
         if (config.points.collapseLocal) {
-            val radiusSquared = config.points.localMessageRadius * config.points.localMessageRadius
+            val radius = config.points.localMessageRadius
+            val radiusSquared = radius * radius
+
             Bukkit.getOnlinePlayers().forEach { player ->
-                player.scheduler.run(plugin) { _ ->
-                    if (player.world.name != point.worldName) return@run
-                    val center = Location(player.world, point.centerX.toDouble(), player.location.y, point.centerZ.toDouble())
-                    if (player.location.distanceSquared(center) <= radiusSquared) {
-                        MessageUtil.send(player, config.messages.collapseLocal)
+                Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
+                    try {
+                        // всё внутри выполняется на корректном потоке региона игрока
+
+                        val world = player.world
+                        if (world.name != point.worldName) return@run
+
+                        val px = player.x
+                        val pz = player.z
+
+                        val dx = px - point.centerX
+                        val dz = pz - point.centerZ
+
+                        if (dx * dx + dz * dz <= radiusSquared) {
+                            MessageUtil.send(player, config.messages.collapseLocal)
+                        }
+                    } catch (e: Throwable) {
+                        plugin.logger.severe("collapseLocal failed: " + e.message)
                     }
                 }
             }
+
         }
         if (config.points.collapseGlobal) {
             MessageUtil.broadcast(config.messages.collapseGlobal)
         }
     }
 
-    private fun collapseAll(reason: String) {
+    private fun collapseAll(reason: CollapseReason) {
         debug.info("Collapsing all points (reason=$reason).")
-        points.values.toList().forEach { collapsePoint(it, reason) }
+        points.values.toList().forEach { collapsePoint(it, reason.name.lowercase()) }
     }
-
-    fun activePoints(): Collection<EchoPoint> = points.values
 
     fun scheduleTasks() {
         cancelTasks()
@@ -329,11 +345,10 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         if (!eventActive) return
         points.values.forEach { point ->
             val world = Bukkit.getWorld(point.worldName) ?: return@forEach
-            val chunkX = point.centerX shr 4
-            val chunkZ = point.centerZ shr 4
-            world.regionScheduler.run(plugin, chunkX, chunkZ) { _ ->
-                val center = Location(world, point.centerX.toDouble(), world.spawnLocation.y.toDouble(), point.centerZ.toDouble())
-                world.spawnParticle(config.zoneEffects.particle.type, center, config.zoneEffects.particle.count, config.zoneEffects.particle.radius, 1.0, config.zoneEffects.particle.radius)
+
+            val location = Location(world, point.centerX.toDouble(), world.spawnLocation.y, point.centerZ.toDouble())
+            Bukkit.getRegionScheduler().run(plugin, location) { _ ->
+                world.spawnParticle(config.zoneEffects.particle.type, location, config.zoneEffects.particle.count, config.zoneEffects.particle.radius, 1.0, config.zoneEffects.particle.radius)
             }
         }
     }
@@ -342,11 +357,9 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         if (!eventActive) return
         points.values.forEach { point ->
             val world = Bukkit.getWorld(point.worldName) ?: return@forEach
-            val chunkX = point.centerX shr 4
-            val chunkZ = point.centerZ shr 4
-            world.regionScheduler.run(plugin, chunkX, chunkZ) { _ ->
-                val center = Location(world, point.centerX.toDouble(), world.spawnLocation.y.toDouble(), point.centerZ.toDouble())
-                world.playSound(center, config.zoneEffects.sound.type, config.zoneEffects.sound.volume, config.zoneEffects.sound.pitch)
+            val location = Location(world, point.centerX.toDouble(), world.spawnLocation.y, point.centerZ.toDouble())
+            Bukkit.getRegionScheduler().run(plugin, location) { _ ->
+                world.playSound(location, config.zoneEffects.sound.type, config.zoneEffects.sound.volume, config.zoneEffects.sound.pitch)
             }
         }
     }
@@ -356,7 +369,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         val stayCost = config.points.stayCost
         if (stayCost <= 0) return
         for (player in Bukkit.getOnlinePlayers()) {
-            player.scheduler.run(plugin) { _ ->
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
                 val point = isInPoint(player.location) ?: return@run
                 debug.info("Stay activity: ${player.name} in point ${point.id}.")
                 addActivity(point, stayCost)
@@ -367,7 +380,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
     private fun tickHunger() {
         if (!eventActive || !config.hungerDrift.enabled) return
         for (player in Bukkit.getOnlinePlayers()) {
-            player.scheduler.run(plugin) { _ ->
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
                 val point = isInPoint(player.location) ?: return@run
                 if (point.distortion != DistortionType.HUNGER_DRIFT) return@run
                 player.exhaustion = (player.exhaustion + config.hungerDrift.exhaustionDelta).coerceAtLeast(0f)
@@ -381,7 +394,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         if (!eventActive || !config.randomTickBoost.enabled) return
         val remainingChecks = AtomicInteger(config.randomTickBoost.maxChecksPerTick)
         for (player in Bukkit.getOnlinePlayers()) {
-            player.scheduler.run(plugin) { _ ->
+            Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
                 if (remainingChecks.get() <= 0) return@run
                 val point = isInPoint(player.location) ?: return@run
                 if (point.distortion != DistortionType.RANDOM_TICK_BOOST) return@run
@@ -404,7 +417,7 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                             debug.info("Boosted growth at ${block.x},${block.y},${block.z} for ${player.name}.")
                             addActivity(point, config.randomTickBoost.activityGain)
                         }
-                    } else if (block.type == org.bukkit.Material.SUGAR_CANE || block.type == org.bukkit.Material.BAMBOO) {
+                    } else if (block.type == Material.SUGAR_CANE || block.type == Material.BAMBOO) {
                         val above = block.location.clone().add(0.0, 1.0, 0.0).block
                         if (above.type.isAir) {
                             above.type = block.type
@@ -417,26 +430,24 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
         }
     }
 
-    fun scheduleDecay(point: EchoPoint, playerId: UUID, location: Location, type: org.bukkit.Material) {
+    fun scheduleDecay(point: EchoPoint, playerId: UUID, location: Location, type: Material) {
         val world = location.world
-        val chunkX = location.blockX shr 4
-        val chunkZ = location.blockZ shr 4
-        world.regionScheduler.runDelayed(plugin, chunkX, chunkZ, { _ ->
+        Bukkit.getRegionScheduler().runDelayed(plugin, location, { _ ->
             if (!points.containsKey(point.id)) return@runDelayed
             val block = location.block
             if (block.type != type) return@runDelayed
-            block.type = org.bukkit.Material.AIR
+            block.type = Material.AIR
             val particleLocation = location.clone().add(0.5, 0.5, 0.5)
             world.spawnParticle(config.placementDecay.particles.type, particleLocation, config.placementDecay.particles.count, 0.3, 0.3, 0.3)
             world.playSound(location, config.placementDecay.sound.type, config.placementDecay.sound.volume, config.placementDecay.sound.pitch)
             if (config.placementDecay.returnItem) {
-                val item = type.createItemStack()
+                val item = ItemStack(type, 1)
                 val player = Bukkit.getPlayer(playerId)
                 if (player != null) {
-                    player.scheduler.run(plugin) { _ ->
+                    Bukkit.getRegionScheduler().run(plugin, player.location) { _ ->
                         val leftover = player.inventory.addItem(item)
                         if (leftover.isNotEmpty()) {
-                            world.regionScheduler.run(plugin, chunkX, chunkZ) { _ ->
+                            Bukkit.getRegionScheduler().run(plugin, location) { _ ->
                                 leftover.values.forEach { world.dropItemNaturally(location, it) }
                             }
                         }
