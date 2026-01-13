@@ -309,6 +309,15 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
     }
 
     private fun pickLocation(world: World): Location? {
+        if (config.points.forceNearPlayer) {
+            debug.info("Выбор координат: принудительно near-player, мир=${world.name}.")
+            val nearPlayerLocation = pickNearPlayerLocation(world)
+            if (nearPlayerLocation != null) {
+                return nearPlayerLocation
+            }
+            debug.info("Нет игроков для near-player, используем random-range fallback.")
+            return pickRandomRangeLocation(world)
+        }
         debug.info("Выбор координат: режим=${config.points.coordinateMode.lowercase()} мир=${world.name}.")
         return when (config.points.coordinateMode.lowercase()) {
             "ring" -> {
@@ -330,12 +339,28 @@ class EchoEventManager(private val plugin: Main, private val config: PluginConfi
                 }
             }
             else -> {
-                val x = random.nextInt(config.points.randomRange.minX, config.points.randomRange.maxX + 1)
-                val z = random.nextInt(config.points.randomRange.minZ, config.points.randomRange.maxZ + 1)
-                debug.info("Случайные координаты выбраны: x=$x z=$z.")
-                Location(world, x.toDouble(), 64.0, z.toDouble())
+                pickRandomRangeLocation(world)
             }
         }
+    }
+
+    private fun pickNearPlayerLocation(world: World): Location? {
+        val players = Bukkit.getOnlinePlayers().filter { it.world.name == world.name }
+        if (players.isEmpty()) {
+            debug.info("Near-player не выбрал координаты: игроков в мире ${world.name} нет.")
+            return null
+        }
+        val player = players.random()
+        val location = player.location
+        debug.info("Near-player выбран: игрок=${player.name} x=${location.blockX} z=${location.blockZ}.")
+        return Location(world, location.blockX.toDouble(), 64.0, location.blockZ.toDouble())
+    }
+
+    private fun pickRandomRangeLocation(world: World): Location {
+        val x = random.nextInt(config.points.randomRange.minX, config.points.randomRange.maxX + 1)
+        val z = random.nextInt(config.points.randomRange.minZ, config.points.randomRange.maxZ + 1)
+        debug.info("Случайные координаты выбраны: x=$x z=$z.")
+        return Location(world, x.toDouble(), 64.0, z.toDouble())
     }
 
     private fun isLocationValid(location: Location, world: World): Boolean {
