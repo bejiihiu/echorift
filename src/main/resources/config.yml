@@ -67,6 +67,19 @@ zone-effects:
     volume: 0.8
     pitch: 1.2
     interval-seconds: 20
+  disturbance:
+    interval-seconds: 10
+    push-chance: 0.25
+    push-strength: 0.2
+    slow-fall-chance: 0.1
+    slow-fall-duration-seconds: 2
+    noise-chance: 0.05
+    noise-volume: 0.8
+    noise-pitch: 0.9
+    noise-sounds:
+      - "BLOCK_SCULK_CHARGE"
+      - "AMBIENT_CAVE"
+      - "BLOCK_AMETHYST_BLOCK_RESONATE"
 
 activity:
   enter-cost: 0
